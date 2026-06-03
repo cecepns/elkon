@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
-import { Search, ChevronLeft, ChevronRight, Inbox } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Inbox, ChevronDown } from "lucide-react";
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -148,7 +148,7 @@ export default function Shop() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-12">
+    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 md:space-y-12">
       {/* Page Title */}
       <div className="space-y-2 border-b border-stone-100 pb-6">
         <span className="text-[10px] font-semibold tracking-[0.3em] uppercase text-stone-400">Katalog Pakaian</span>
@@ -170,7 +170,7 @@ export default function Shop() {
         </div>
 
         {/* Categories filters (Responsive horizontal scroll on mobile, wrap on desktop) */}
-        <div className="flex items-center overflow-x-auto scrollbar-none gap-2 pb-2 lg:pb-0 -mx-6 px-6 lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-x-visible">
+        <div className="flex items-center overflow-x-auto scrollbar-none gap-2 pb-2 lg:pb-0 lg:flex-wrap lg:overflow-x-visible w-full lg:w-auto">
           {/* Custom inline styling to hide scrollbars on modern browsers for cleaner premium look */}
           <style>{`
             .scrollbar-none::-webkit-scrollbar {
@@ -184,8 +184,8 @@ export default function Shop() {
           <button
             onClick={() => handleCategorySelect("")}
             className={`px-4 py-2 lg:py-1.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-250 rounded-none ${!categoryIdParam
-                ? "bg-stone-900 text-white shadow-sm"
-                : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
+              ? "bg-stone-900 text-white shadow-sm"
+              : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
               }`}
           >
             Semua
@@ -197,8 +197,8 @@ export default function Shop() {
                 key={cat.id}
                 onClick={() => handleCategorySelect(cat.id)}
                 className={`px-4 py-2 lg:py-1.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-250 rounded-none ${isActive
-                    ? "bg-stone-900 text-white shadow-sm"
-                    : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
+                  ? "bg-stone-900 text-white shadow-sm"
+                  : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
                   }`}
               >
                 {cat.name}
@@ -209,34 +209,44 @@ export default function Shop() {
 
         {/* Sort & Limit (Grid columns on mobile for perfect alignment, flex on desktop) */}
         <div className="grid grid-cols-2 gap-4 w-full lg:flex lg:w-auto lg:items-center lg:gap-6">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+          <div className="flex flex-col gap-1.5 w-full lg:flex-row lg:items-center lg:gap-2 lg:w-auto">
             <span className="text-[10px] text-stone-400 uppercase tracking-widest font-semibold whitespace-nowrap">Urutkan:</span>
-            <select
-              value={sortParam}
-              onChange={handleSortChange}
-              className="w-full bg-white border border-stone-200 text-xs text-stone-750 px-3 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs"
-            >
-              <option value="newest">Terbaru</option>
-              <option value="oldest">Terlama</option>
-              <option value="price_asc">Harga: Rendah - Tinggi</option>
-              <option value="price_desc">Harga: Tinggi - Rendah</option>
-              <option value="name_asc">Nama: A - Z</option>
-              <option value="name_desc">Nama: Z - A</option>
-            </select>
+            <div className="relative w-full lg:w-48">
+              <select
+                value={sortParam}
+                onChange={handleSortChange}
+                className="w-full appearance-none bg-white border border-stone-200 text-xs text-stone-800 pl-3 pr-8 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs transition-all"
+              >
+                <option value="newest">Terbaru</option>
+                <option value="oldest">Terlama</option>
+                <option value="price_asc">Harga: Rendah - Tinggi</option>
+                <option value="price_desc">Harga: Tinggi - Rendah</option>
+                <option value="name_asc">Nama: A - Z</option>
+                <option value="name_desc">Nama: Z - A</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-stone-400">
+                <ChevronDown className="h-3.5 w-3.5" />
+              </div>
+            </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+          <div className="flex flex-col gap-1.5 w-full lg:flex-row lg:items-center lg:gap-2 lg:w-auto">
             <span className="text-[10px] text-stone-400 uppercase tracking-widest font-semibold whitespace-nowrap">Tampil:</span>
-            <select
-              value={limitParam}
-              onChange={handleLimitChange}
-              className="w-full bg-white border border-stone-200 text-xs text-stone-755 px-3 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs"
-            >
-              <option value="10">10 Pakaian</option>
-              <option value="25">25 Pakaian</option>
-              <option value="50">50 Pakaian</option>
-              <option value="100">100 Pakaian</option>
-            </select>
+            <div className="relative w-full lg:w-32">
+              <select
+                value={limitParam}
+                onChange={handleLimitChange}
+                className="w-full appearance-none bg-white border border-stone-200 text-xs text-stone-800 pl-3 pr-8 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs transition-all"
+              >
+                <option value="10">10 Pakaian</option>
+                <option value="25">25 Pakaian</option>
+                <option value="50">50 Pakaian</option>
+                <option value="100">100 Pakaian</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-stone-400">
+                <ChevronDown className="h-3.5 w-3.5" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -328,8 +338,8 @@ export default function Shop() {
                 key={pNum}
                 onClick={() => handlePageChange(pNum)}
                 className={`px-3 py-1.5 text-xs font-semibold transition-all ${paginationMeta.page === pNum
-                    ? "bg-stone-900 text-white"
-                    : "border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400 bg-white"
+                  ? "bg-stone-900 text-white"
+                  : "border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400 bg-white"
                   }`}
               >
                 {pNum}
