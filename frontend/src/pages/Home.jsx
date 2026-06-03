@@ -4,6 +4,7 @@ import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
 import { ArrowRight } from "lucide-react";
+import HeroImage from '../assets/product_silk_dress.png';
 
 // Import Swiper React components & modules
 import { Swiper, SwiperSlide } from 'swiper/react';
@@ -325,7 +326,7 @@ export default function Home() {
       <section className="relative h-[60vh] w-full overflow-hidden bg-stone-900 flex items-center">
         <div className="absolute inset-0">
           <img
-            src="/uploads-elkon/product_silk_dress.png"
+            src={HeroImage}
             alt="elkon silhouette look"
             className="h-full w-full object-cover object-center opacity-40"
           />
