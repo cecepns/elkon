@@ -282,7 +282,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
                   {/* Add to Bag */}
                   <button
                     onClick={handleAdd}
-                    className="flex-1 flex items-center justify-center space-x-3 bg-stone-900 h-14 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black transition-all duration-200"
+                    className="w-full sm:flex-1 flex items-center justify-center space-x-3 bg-stone-900 h-14 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black transition-all duration-200"
                   >
                     <ShoppingBag className="h-4 w-4" />
                     <span>Tambah ke Keranjang</span>
@@ -291,7 +291,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
                   {/* Beli via WhatsApp Option (dynamic whatsapp number link) */}
                   <button
                     onClick={handleBuyWhatsApp}
-                    className="flex-1 flex items-center justify-center space-x-3 border border-[#25D366] text-[#25D366] bg-white h-14 text-xs font-semibold uppercase tracking-widest hover:bg-[#25D366] hover:text-white transition-all duration-200"
+                    className="w-full sm:flex-1 flex items-center justify-center space-x-3 border border-[#25D366] text-[#25D366] bg-white h-14 text-xs font-semibold uppercase tracking-widest hover:bg-[#25D366] hover:text-white transition-all duration-200"
                   >
                     {/* SVG WA logo */}
                     <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
