@@ -156,24 +156,34 @@ export default function Shop() {
       </div>
 
       {/* Controls: Search, Filter, Sort, Limit */}
-      <div className="flex flex-col md:flex-row gap-6 md:items-center justify-between bg-stone-50/50 p-6 border border-stone-100 rounded">
+      <div className="flex flex-col lg:flex-row gap-6 lg:items-center justify-between bg-stone-50/50 p-6 border border-stone-100 rounded">
         {/* Search */}
-        <div className="relative flex-1 max-w-md">
+        <div className="relative w-full lg:max-w-xs">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
           <input
             type="text"
-            className="w-full bg-white border border-stone-200 pl-10 pr-4 py-2 text-sm text-stone-950 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+            className="w-full bg-white border border-stone-200 pl-10 pr-4 py-2.5 lg:py-2 text-sm text-stone-950 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400 rounded-none shadow-xs"
             placeholder="Cari pakaian..."
             value={searchInput}
             onChange={handleSearchChange}
           />
         </div>
 
-        {/* Categories filters */}
-        <div className="flex flex-wrap items-center gap-2">
+        {/* Categories filters (Responsive horizontal scroll on mobile, wrap on desktop) */}
+        <div className="flex items-center overflow-x-auto scrollbar-none gap-2 pb-2 lg:pb-0 -mx-6 px-6 lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-x-visible">
+          {/* Custom inline styling to hide scrollbars on modern browsers for cleaner premium look */}
+          <style>{`
+            .scrollbar-none::-webkit-scrollbar {
+              display: none;
+            }
+            .scrollbar-none {
+              -ms-overflow-style: none;
+              scrollbar-width: none;
+            }
+          `}</style>
           <button
             onClick={() => handleCategorySelect("")}
-            className={`px-4 py-1.5 text-xs font-semibold uppercase tracking-wider transition-all duration-250 ${!categoryIdParam
+            className={`px-4 py-2 lg:py-1.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-250 rounded-none ${!categoryIdParam
                 ? "bg-stone-900 text-white shadow-sm"
                 : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
               }`}
@@ -186,7 +196,7 @@ export default function Shop() {
               <button
                 key={cat.id}
                 onClick={() => handleCategorySelect(cat.id)}
-                className={`px-4 py-1.5 text-xs font-semibold uppercase tracking-wider transition-all duration-250 ${isActive
+                className={`px-4 py-2 lg:py-1.5 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-250 rounded-none ${isActive
                     ? "bg-stone-900 text-white shadow-sm"
                     : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
                   }`}
@@ -197,35 +207,35 @@ export default function Shop() {
           })}
         </div>
 
-        {/* Sort & Limit */}
-        <div className="flex items-center gap-4">
-          <div className="flex items-center space-x-2">
-            <span className="text-xs text-stone-500 uppercase tracking-wider">Urutkan:</span>
+        {/* Sort & Limit (Grid columns on mobile for perfect alignment, flex on desktop) */}
+        <div className="grid grid-cols-2 gap-4 w-full lg:flex lg:w-auto lg:items-center lg:gap-6">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+            <span className="text-[10px] text-stone-400 uppercase tracking-widest font-semibold whitespace-nowrap">Urutkan:</span>
             <select
               value={sortParam}
               onChange={handleSortChange}
-              className="bg-white border border-stone-200 text-xs text-stone-700 px-3 py-1.5 focus:border-stone-900 focus:outline-none"
+              className="w-full bg-white border border-stone-200 text-xs text-stone-750 px-3 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs"
             >
               <option value="newest">Terbaru</option>
               <option value="oldest">Terlama</option>
-              <option value="price_asc">Harga: Terendah ke Tertinggi</option>
-              <option value="price_desc">Harga: Tertinggi ke Terendah</option>
+              <option value="price_asc">Harga: Rendah - Tinggi</option>
+              <option value="price_desc">Harga: Tinggi - Rendah</option>
               <option value="name_asc">Nama: A - Z</option>
               <option value="name_desc">Nama: Z - A</option>
             </select>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <span className="text-xs text-stone-500 uppercase tracking-wider">Tampil:</span>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2 w-full lg:w-auto">
+            <span className="text-[10px] text-stone-400 uppercase tracking-widest font-semibold whitespace-nowrap">Tampil:</span>
             <select
               value={limitParam}
               onChange={handleLimitChange}
-              className="bg-white border border-stone-200 text-xs text-stone-700 px-3 py-1.5 focus:border-stone-900 focus:outline-none"
+              className="w-full bg-white border border-stone-200 text-xs text-stone-755 px-3 py-2.5 lg:py-1.5 focus:border-stone-900 focus:outline-none rounded-none shadow-xs"
             >
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
+              <option value="10">10 Pakaian</option>
+              <option value="25">25 Pakaian</option>
+              <option value="50">50 Pakaian</option>
+              <option value="100">100 Pakaian</option>
             </select>
           </div>
         </div>
