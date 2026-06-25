@@ -241,13 +241,36 @@ export default function Home() {
         <span className="text-xs font-semibold tracking-[0.4em] uppercase text-stone-400">
           Filosofi Kami
         </span>
-        <h2 className="font-serif text-3xl md:text-5xl font-light tracking-wide text-stone-900 leading-snug">
-          "Kami tidak merancang pakaian untuk membuat pernyataan, tetapi untuk mendefinisikan arsitektur bagi pemakainya."
+        <h2 className="font-serif text-2xl md:text-4xl font-light tracking-wide text-stone-900 leading-snug">
+          The Philosophy of Eliteikon
         </h2>
         <div className="h-[1px] w-20 bg-stone-200 mx-auto" />
-        <p className="mx-auto max-w-2xl text-sm md:text-base font-light text-stone-500 leading-loose">
-          Desain elkon berakar pada dialog antara alam dan arsitektur. Menggunakan bahan linen pilihan, sutra organik, dan wol halus, setiap helai pakaian dipotong untuk menonjolkan bentuk, bayangan, dan kehadiran taktil. Dirancang untuk daya tahan lama dan kenyamanan yang anggun.
-        </p>
+        <div className="mx-auto max-w-2xl space-y-5 text-sm md:text-base font-light text-stone-500 leading-loose text-left md:text-center">
+          <p>
+            Eliteikon was born from the belief that true beauty can coexist with a greater purpose—the preservation of our planet and the empowerment of people. Every product we create is designed not only to embody elegance, but also to contribute to a more sustainable future and create meaningful opportunities that help reduce unemployment and support local communities.
+          </p>
+          <p>
+            Through every design, we offer more than just clothing. We create pieces that reflect grace, confidence, and the unique journey of every woman. Each detail is thoughtfully crafted to deliver comfort, exceptional quality, and timeless aesthetics that transcend fleeting trends.
+          </p>
+          <p>
+            The name Eliteikon is a fusion of &ldquo;Elite,&rdquo; representing excellence, refinement, and the highest standards of quality, and &ldquo;Icon,&rdquo; symbolizing individuals who inspire others by embracing their authenticity and uniqueness. We believe that every woman has the potential to become an icon in her own life story.
+          </p>
+          <p>
+            With a romantic and timeless design approach, Eliteikon accompanies women through every chapter of their journey—from everyday moments to life&apos;s most meaningful milestones. Our creations are designed to celebrate individuality while leaving a positive impact on both people and the planet.
+          </p>
+          <p>
+            At Eliteikon, fashion is more than self-expression. It is a conscious choice to honor your personal journey, support a better future for the Earth, empower communities, and leave a legacy of purpose, beauty, and meaning.
+          </p>
+        </div>
+        <div className="mx-auto max-w-2xl space-y-3 pt-4">
+          <span className="text-[10px] font-semibold tracking-[0.3em] uppercase text-stone-400">Our Tagline</span>
+          <p className="font-serif text-xl md:text-2xl font-light italic text-stone-800 leading-relaxed">
+            &ldquo;Elegance Beyond Appearance, Confidence Beyond Trends.&rdquo;
+          </p>
+          <p className="text-xs md:text-sm font-light text-stone-400 leading-relaxed">
+            A reflection of our belief that true elegance comes from purpose, authenticity, and the confidence to create a lasting impact beyond what is seen.
+          </p>
+        </div>
       </section>
 
       {/* Editorial Collection Showcase (Modified to show 2 columns on mobile: grid-cols-2) */}
@@ -289,7 +312,7 @@ export default function Home() {
                     <div className="relative aspect-[3/4] overflow-hidden">
                       {(product.is_preorder === 1 || product.is_preorder === true) && (
                         <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
-                          Pre-Order: {product.preorder_days || 30} Hari
+                          Pre-Order: {product.preorder_days || 14} Hari
                         </div>
                       )}
                       <img

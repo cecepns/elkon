@@ -115,7 +115,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
     }
 
     const price = selectedVariant.price_override !== null ? selectedVariant.price_override : product.base_price;
-    const preorderText = (product.is_preorder === 1 || product.is_preorder === true) ? `\n*Status*: Pre-Order (${product.preorder_days || 30} Hari)` : "";
+    const preorderText = (product.is_preorder === 1 || product.is_preorder === true) ? `\n*Status*: Pre-Order (${product.preorder_days || 14} Hari)` : "";
     const textMessage = `Halo elkon, saya tertarik membeli produk berikut:\n\n*Nama Produk*: ${product.name}${preorderText}\n*Ukuran*: ${selectedVariant.size}\n*Warna*: ${selectedVariant.color}\n*SKU*: ${selectedVariant.sku}\n*Harga*: ${formatPrice(price)}\n*Jumlah*: ${quantity}\n\nMohon dibantu untuk proses pemesanan. Terima kasih.`;
 
     const waUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(textMessage)}`;
@@ -153,7 +153,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
               </span>
               {(product.is_preorder === 1 || product.is_preorder === true) && (
                 <span className="bg-stone-900 text-white text-[8px] font-semibold uppercase tracking-widest px-2 py-0.5 shadow-sm">
-                  Pre-Order: {product.preorder_days || 30} Hari
+                  Pre-Order: {product.preorder_days || 14} Hari
                 </span>
               )}
             </div>
@@ -171,10 +171,18 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
             </p>
 
             {(product.is_preorder === 1 || product.is_preorder === true) && (
-              <div className="bg-stone-550/5 border border-stone-200 p-4 text-xs space-y-1">
-                <p className="font-semibold uppercase tracking-wider text-stone-850">Informasi Pemesanan Pre-Order</p>
-                <p className="text-stone-550 font-light leading-relaxed">
-                  Produk ini adalah produk pre-order dengan waktu estimasi pengerjaan dan pengiriman sekitar <span className="font-semibold text-stone-900">{product.preorder_days || 30} hari</span>. Kami akan mengirimkan pesanan Anda sesegera mungkin setelah proses produksi selesai.
+              <div className="bg-stone-550/5 border border-stone-200 p-4 text-xs space-y-3">
+                <p className="font-semibold uppercase tracking-wider text-stone-850">Informasi Pre-Order</p>
+                <ul className="text-stone-550 font-light leading-relaxed space-y-1.5 list-disc list-inside">
+                  <li>Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.</li>
+                  <li>Pembayaran dilakukan sebelum pesanan diproses.</li>
+                  <li>Pesanan yang sudah masuk produksi tidak dapat dibatalkan.</li>
+                  <li>Perubahan ukuran/warna maksimal 1x24 jam setelah pembayaran.</li>
+                  <li>Produk dikirim setelah proses produksi dan QC selesai.</li>
+                  <li>Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing.</li>
+                </ul>
+                <p className="text-stone-500 font-light italic">
+                  By placing an order, you agree to our Pre-Order Policy. ✨
                 </p>
               </div>
             )}

@@ -54,7 +54,7 @@ export default function AdminProducts({ onActionSuccess }) {
   const [prodVariants, setProdVariants] = useState([]);
   // Pre-Order Fields
   const [isPreorder, setIsPreorder] = useState(false);
-  const [preorderDays, setPreorderDays] = useState(30);
+  const [preorderDays, setPreorderDays] = useState(14);
 
   // Fetch Categories List
   const fetchCategories = async () => {
@@ -148,7 +148,7 @@ export default function AdminProducts({ onActionSuccess }) {
     setProdCategoryId(prod.category_id || "");
     setProdStatus(prod.status);
     setIsPreorder(prod.is_preorder === 1 || prod.is_preorder === true);
-    setPreorderDays(prod.preorder_days || 30);
+    setPreorderDays(prod.preorder_days || 14);
 
     const fullImg = getImageUrl(prod.image);
     setProdImagePreview(prod.image ? fullImg : "");
@@ -398,7 +398,7 @@ export default function AdminProducts({ onActionSuccess }) {
                     <td className="px-6 py-4 text-center">
                       {(prod.is_preorder === 1 || prod.is_preorder === true) ? (
                         <span className="inline-flex px-2 py-0.5 text-[9px] font-semibold bg-stone-900 text-white uppercase tracking-wider">
-                          {prod.preorder_days || 30} Hari
+                          {prod.preorder_days || 14} Hari
                         </span>
                       ) : (
                         <span className="text-xs text-stone-400 font-light">-</span>

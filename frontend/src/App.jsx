@@ -39,7 +39,7 @@ function FloatingWhatsApp({ whatsappNumber }) {
   
   if (isAdminOrLogin || !whatsappNumber) return null;
 
-  const waUrl = `https://wa.me/${whatsappNumber}?text=Halo%20elkon,%20saya%20tertarik%20dengan%20koleksi%20pakaian%20Anda.`;
+  const waUrl = `https://wa.me/${whatsappNumber}?text=Halo%20Eliteikon,%20saya%20tertarik%20dengan%20koleksi%20pakaian%20Anda.`;
 
   return (
     <a
@@ -71,7 +71,7 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   
   // Settings state (containing whatsapp_number)
-  const [settings, setSettings] = useState({ whatsapp_number: "628123456789" });
+  const [settings, setSettings] = useState({ whatsapp_number: "6287865407492" });
 
   // Load cart on mount
   useEffect(() => {

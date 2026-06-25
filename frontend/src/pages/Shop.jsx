@@ -279,7 +279,7 @@ export default function Shop() {
                   <div className="relative aspect-[3/4] overflow-hidden">
                     {(product.is_preorder === 1 || product.is_preorder === true) && (
                       <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
-                        Pre-Order: {product.preorder_days || 30} Hari
+                        Pre-Order: {product.preorder_days || 14} Hari
                       </div>
                     )}
                     <img

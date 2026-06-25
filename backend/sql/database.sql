@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS products (
   category_id INT,
   status VARCHAR(20) DEFAULT 'active', -- active, draft
   is_preorder TINYINT(1) DEFAULT 0,
-  preorder_days INT DEFAULT 30,
+  preorder_days INT DEFAULT 14,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
@@ -140,5 +140,5 @@ ON DUPLICATE KEY UPDATE id=id;
 
 -- Seed Settings
 INSERT INTO settings (key_name, value_text) VALUES 
-('whatsapp_number', '628123456789')
+('whatsapp_number', '6287865407492')
 ON DUPLICATE KEY UPDATE value_text=value_text;

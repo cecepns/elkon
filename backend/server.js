@@ -643,7 +643,7 @@ app.post('/api/products', verifyToken, async (req, res) => {
         category_id,
         status || 'active',
         is_preorder ? 1 : 0,
-        preorder_days !== undefined && preorder_days !== null ? parseInt(preorder_days) : 30
+        preorder_days !== undefined && preorder_days !== null ? parseInt(preorder_days) : 14
       ]
     );
 
@@ -723,7 +723,7 @@ app.put('/api/products/:id', verifyToken, async (req, res) => {
         category_id,
         status || 'active',
         is_preorder ? 1 : 0,
-        preorder_days !== undefined && preorder_days !== null ? parseInt(preorder_days) : 30,
+        preorder_days !== undefined && preorder_days !== null ? parseInt(preorder_days) : 14,
         id
       ]
     );

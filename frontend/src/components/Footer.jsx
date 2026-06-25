@@ -9,7 +9,7 @@ export default function Footer() {
             <img src="/logo.png" alt="elkon logo" className="h-8 w-auto opacity-75" />
           </div>
           <p className="text-[10px] text-stone-400 tracking-wider">
-            &copy; {new Date().getFullYear()} ELKON STYLES. HAK CIPTA DILINDUNGI. ARSITEKTUR PAKAIAN UNTUK PEMAKAINYA.
+            &copy; {new Date().getFullYear()} ELITEIKON. HAK CIPTA DILINDUNGI. ELEGANCE BEYOND APPEARANCE, CONFIDENCE BEYOND TRENDS.
           </p>
         </div>
       </div>

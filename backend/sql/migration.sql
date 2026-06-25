@@ -77,10 +77,10 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Seed default WhatsApp number setting
 INSERT INTO settings (key_name, value_text) VALUES 
-('whatsapp_number', '628123456789')
+('whatsapp_number', '6287865407492')
 ON DUPLICATE KEY UPDATE value_text=value_text;
 
 -- 6. Add preorder fields to products table
 ALTER TABLE products ADD COLUMN is_preorder TINYINT(1) DEFAULT 0 AFTER status;
-ALTER TABLE products ADD COLUMN preorder_days INT DEFAULT 30 AFTER is_preorder;
+ALTER TABLE products ADD COLUMN preorder_days INT DEFAULT 14 AFTER is_preorder;
 
