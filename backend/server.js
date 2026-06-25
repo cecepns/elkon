@@ -448,9 +448,10 @@ app.put('/api/settings', verifyToken, async (req, res) => {
 
   try {
     for (const [key, val] of Object.entries(settingsObj)) {
+      const valueText = typeof val === "string" ? val.trim() : String(val);
       await connection.query(
         'INSERT INTO settings (key_name, value_text) VALUES (?, ?) ON DUPLICATE KEY UPDATE value_text = ?',
-        [key, val.trim(), val.trim()]
+        [key, valueText, valueText]
       );
     }
     await connection.commit();

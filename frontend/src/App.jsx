@@ -16,6 +16,7 @@ import Footer from "./components/Footer";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
 import ProductDetail from "./pages/ProductDetail";
+import { parsePreorderPolicy } from "./utils/preorderPolicy";
 import Contact from "./pages/Contact";
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -243,7 +244,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/shop" element={<Shop />} />
-            <Route path="/product/:id" element={<ProductDetail onAddToCart={handleAddToCart} whatsappNumber={settings.whatsapp_number} />} />
+            <Route path="/product/:id" element={<ProductDetail onAddToCart={handleAddToCart} whatsappNumber={settings.whatsapp_number} preorderPolicy={parsePreorderPolicy(settings)} />} />
             <Route path="/contact" element={<Contact />} />
             
             <Route

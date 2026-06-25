@@ -80,6 +80,11 @@ INSERT INTO settings (key_name, value_text) VALUES
 ('whatsapp_number', '6287865407492')
 ON DUPLICATE KEY UPDATE value_text=value_text;
 
+-- Seed default pre-order policy
+INSERT INTO settings (key_name, value_text) VALUES 
+('preorder_policy', '{"items":["Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.","Pembayaran dilakukan sebelum pesanan diproses.","Pesanan yang sudah masuk produksi tidak dapat dibatalkan.","Perubahan ukuran/warna maksimal 1x24 jam setelah pembayaran.","Produk dikirim setelah proses produksi dan QC selesai.","Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing."],"disclaimer":"By placing an order, you agree to our Pre-Order Policy. ✨"}')
+ON DUPLICATE KEY UPDATE value_text=value_text;
+
 -- 6. Add preorder fields to products table
 ALTER TABLE products ADD COLUMN is_preorder TINYINT(1) DEFAULT 0 AFTER status;
 ALTER TABLE products ADD COLUMN preorder_days INT DEFAULT 14 AFTER is_preorder;

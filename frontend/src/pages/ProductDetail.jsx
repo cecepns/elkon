@@ -6,7 +6,7 @@ import { getImageUrl } from "../utils/api";
 import { Minus, Plus, ShoppingBag, ArrowLeft, AlertTriangle } from "lucide-react";
 import toast from "react-hot-toast";
 
-export default function ProductDetail({ onAddToCart, whatsappNumber }) {
+export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPolicy }) {
   const { id } = useParams();
   const [product, setProduct] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -170,20 +170,19 @@ export default function ProductDetail({ onAddToCart, whatsappNumber }) {
               {product.description}
             </p>
 
-            {(product.is_preorder === 1 || product.is_preorder === true) && (
+            {(product.is_preorder === 1 || product.is_preorder === true) && preorderPolicy && (
               <div className="bg-stone-550/5 border border-stone-200 p-4 text-xs space-y-3">
                 <p className="font-semibold uppercase tracking-wider text-stone-850">Informasi Pre-Order</p>
                 <ul className="text-stone-550 font-light leading-relaxed space-y-1.5 list-disc list-inside">
-                  <li>Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.</li>
-                  <li>Pembayaran dilakukan sebelum pesanan diproses.</li>
-                  <li>Pesanan yang sudah masuk produksi tidak dapat dibatalkan.</li>
-                  <li>Perubahan ukuran/warna maksimal 1x24 jam setelah pembayaran.</li>
-                  <li>Produk dikirim setelah proses produksi dan QC selesai.</li>
-                  <li>Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing.</li>
+                  {preorderPolicy.items.map((item, index) => (
+                    <li key={index}>{item}</li>
+                  ))}
                 </ul>
-                <p className="text-stone-500 font-light italic">
-                  By placing an order, you agree to our Pre-Order Policy. ✨
-                </p>
+                {preorderPolicy.disclaimer && (
+                  <p className="text-stone-500 font-light italic">
+                    {preorderPolicy.disclaimer}
+                  </p>
+                )}
               </div>
             )}
 

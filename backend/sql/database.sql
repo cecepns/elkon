@@ -140,5 +140,6 @@ ON DUPLICATE KEY UPDATE id=id;
 
 -- Seed Settings
 INSERT INTO settings (key_name, value_text) VALUES 
-('whatsapp_number', '6287865407492')
+('whatsapp_number', '6287865407492'),
+('preorder_policy', '{"items":["Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.","Pembayaran dilakukan sebelum pesanan diproses.","Pesanan yang sudah masuk produksi tidak dapat dibatalkan.","Perubahan ukuran/warna maksimal 1x24 jam setelah pembayaran.","Produk dikirim setelah proses produksi dan QC selesai.","Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing."],"disclaimer":"By placing an order, you agree to our Pre-Order Policy. ✨"}')
 ON DUPLICATE KEY UPDATE value_text=value_text;
