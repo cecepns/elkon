@@ -19,9 +19,12 @@ import 'swiper/css/effect-fade';
 export default function Home() {
   const [banners, setBanners] = useState([]);
   const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBanners, setLoadingBanners] = useState(true);
 
+  // Fetch banners and categories on mount
   useEffect(() => {
     async function fetchBanners() {
       try {
@@ -36,22 +39,46 @@ export default function Home() {
       }
     }
 
-    async function fetchFeatured() {
+    async function fetchCategories() {
       try {
-        const res = await request.get(API_ENDPOINTS.PRODUCTS.LIST, { limit: 3 });
+        const res = await request.get(API_ENDPOINTS.CATEGORIES.LIST);
+        if (res.success) {
+          setCategories(res.data);
+        }
+      } catch (error) {
+        console.error("Gagal memuat kategori:", error);
+      }
+    }
+
+    fetchBanners();
+    fetchCategories();
+  }, []);
+
+  // Fetch products up to limit 12 with optional category filter
+  useEffect(() => {
+    async function fetchProducts() {
+      setLoadingProducts(true);
+      try {
+        const params = {
+          limit: 12,
+          status: "active",
+        };
+        if (selectedCategory) {
+          params.category_id = selectedCategory;
+        }
+        const res = await request.get(API_ENDPOINTS.PRODUCTS.LIST, params);
         if (res.success) {
           setFeaturedProducts(res.data);
         }
       } catch (error) {
-        console.error("Gagal memuat produk unggulan:", error);
+        console.error("Gagal memuat produk:", error);
       } finally {
         setLoadingProducts(false);
       }
     }
 
-    fetchBanners();
-    fetchFeatured();
-  }, []);
+    fetchProducts();
+  }, [selectedCategory]);
 
   const formatPrice = (price) => {
     return new Intl.NumberFormat("id-ID", {
@@ -273,22 +300,61 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Editorial Collection Showcase (Modified to show 2 columns on mobile: grid-cols-2) */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-12">
-        <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-stone-100 pb-4">
+      {/* Editorial Collection Showcase (Max 12 products with dynamic category filter) */}
+      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 space-y-10">
+        <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-stone-100 pb-4 gap-4">
           <div className="space-y-1">
             <span className="text-xs font-semibold tracking-[0.3em] uppercase text-stone-400">Pilihan Editor</span>
             <h3 className="font-serif text-2xl md:text-3xl text-stone-900 font-light">Koleksi yang Tersedia</h3>
           </div>
-          <Link to="/shop" className="group mt-4 md:mt-0 flex items-center space-x-2 text-xs font-medium uppercase tracking-widest text-stone-600 hover:text-stone-900 transition-colors">
+          <Link to="/shop" className="group flex items-center space-x-2 text-xs font-medium uppercase tracking-widest text-stone-600 hover:text-stone-900 transition-colors">
             <span>Jelajahi Semua Produk</span>
             <ArrowRight className="h-3 w-3 group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>
 
+        {/* Dynamic Categories Filter Pills */}
+        <div className="flex items-center overflow-x-auto scrollbar-none gap-2 pb-2">
+          <style>{`
+            .scrollbar-none::-webkit-scrollbar {
+              display: none;
+            }
+            .scrollbar-none {
+              -ms-overflow-style: none;
+              scrollbar-width: none;
+            }
+          `}</style>
+          <button
+            onClick={() => setSelectedCategory("")}
+            className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-200 ${
+              !selectedCategory
+                ? "bg-stone-900 text-white shadow-sm"
+                : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
+            }`}
+          >
+            Semua
+          </button>
+          {categories.map((cat) => {
+            const isActive = selectedCategory === cat.id.toString();
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id.toString())}
+                className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider whitespace-nowrap transition-all duration-200 ${
+                  isActive
+                    ? "bg-stone-900 text-white shadow-sm"
+                    : "bg-white border border-stone-200 text-stone-600 hover:text-stone-900 hover:border-stone-400"
+                }`}
+              >
+                {cat.name}
+              </button>
+            );
+          })}
+        </div>
+
         {loadingProducts ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-12">
-            {[1, 2, 3].map((n) => (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-10">
+            {[1, 2, 3, 4, 5, 6].map((n) => (
               <div key={n} className="space-y-4 animate-pulse">
                 <div className="bg-stone-100 aspect-[3/4]" />
                 <div className="h-4 bg-stone-100 w-2/3" />
@@ -296,47 +362,67 @@ export default function Home() {
               </div>
             ))}
           </div>
+        ) : featuredProducts.length === 0 ? (
+          <div className="py-16 text-center space-y-2 border border-dashed border-stone-200 bg-stone-50/50">
+            <p className="font-serif text-base text-stone-600">Belum ada produk pada kategori ini.</p>
+            <p className="text-xs text-stone-400">Silakan pilih kategori lainnya.</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-12">
-            {featuredProducts.map((product, idx) => {
-              const isEven = idx % 2 === 0;
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 md:gap-10">
+            {featuredProducts.map((product) => {
               const imageUrl = getImageUrl(product.image);
 
               return (
                 <div
                   key={product.id}
-                  className={`group space-y-4 md:space-y-6 transition-all duration-500 fade-in ${isEven ? "md:translate-y-0" : "md:translate-y-8"
-                    }`}
+                  className="group space-y-3 sm:space-y-4 transition-all duration-300 fade-in flex flex-col justify-between"
                 >
-                  <Link to={`/product/${product.id}`} className="block overflow-hidden bg-stone-50 border border-stone-100">
-                    <div className="relative aspect-[3/4] overflow-hidden">
-                      {(product.is_preorder === 1 || product.is_preorder === true) && (
-                        <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
-                          Pre-Order: {product.preorder_days || 14} Hari
-                        </div>
-                      )}
-                      <img
-                        src={imageUrl}
-                        alt={product.name}
-                        className="h-full w-full object-cover object-center transition-transform duration-[1.2s] ease-out group-hover:scale-[1.04]"
-                      />
-                      <div className="absolute inset-0 bg-stone-900/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </Link>
+                  <div className="space-y-3">
+                    <Link to={`/product/${product.id}`} className="block overflow-hidden bg-stone-50 border border-stone-100">
+                      <div className="relative aspect-[3/4] overflow-hidden">
+                        {(product.is_preorder === 1 || product.is_preorder === true) && (
+                          <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
+                            Pre-Order: {product.preorder_days || 14} Hari
+                          </div>
+                        )}
+                        <img
+                          src={imageUrl}
+                          alt={product.name}
+                          className="h-full w-full object-cover object-center transition-transform duration-[1.2s] ease-out group-hover:scale-[1.04]"
+                        />
+                        <div className="absolute inset-0 bg-stone-900/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </Link>
 
-                  <div className="space-y-1.5 md:space-y-2">
-                    <span className="text-[9px] md:text-[10px] font-semibold tracking-wider uppercase text-stone-400">
-                      {product.category || "Tanpa Kategori"}
-                    </span>
-                    <div className="flex flex-col sm:flex-row justify-between sm:items-baseline">
-                      <h4 className="font-serif text-sm md:text-lg font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-1">
-                        <Link to={`/product/${product.id}`}>{product.name}</Link>
-                      </h4>
-                      <p className="text-[11px] md:text-xs font-semibold text-stone-900 whitespace-nowrap">{formatPrice(product.base_price)}</p>
+                    <div className="space-y-1.5">
+                      <span className="text-[9px] md:text-[10px] font-semibold tracking-wider uppercase text-stone-400">
+                        {product.category || "Tanpa Kategori"}
+                      </span>
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-1">
+                        <h4 className="font-serif text-sm md:text-lg font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-1">
+                          <Link to={`/product/${product.id}`}>{product.name}</Link>
+                        </h4>
+                        <p className="text-[11px] md:text-xs font-semibold text-stone-900 whitespace-nowrap">{formatPrice(product.base_price)}</p>
+                      </div>
+                      
+                      {/* Truncated description max 4 lines */}
+                      {product.description && (
+                        <p className="text-xs text-stone-500 font-light line-clamp-4 leading-relaxed">
+                          {product.description}
+                        </p>
+                      )}
                     </div>
-                    <p className="hidden sm:block text-xs text-stone-500 font-light line-clamp-2 leading-relaxed">
-                      {product.description}
-                    </p>
+                  </div>
+
+                  {/* Lihat Selengkapnya link */}
+                  <div className="pt-1">
+                    <Link
+                      to={`/product/${product.id}`}
+                      className="inline-flex items-center space-x-1.5 text-xs font-medium uppercase tracking-wider text-stone-900 hover:text-stone-600 hover:underline transition-colors"
+                    >
+                      <span>Lihat Selengkapnya</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
                   </div>
                 </div>
               );

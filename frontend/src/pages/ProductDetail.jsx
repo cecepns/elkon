@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
-import { Minus, Plus, ShoppingBag, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Minus, Plus, ShoppingBag, ArrowLeft, AlertTriangle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPolicy }) {
@@ -17,6 +17,9 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
   const [quantity, setQuantity] = useState(1);
   const [selectedVariant, setSelectedVariant] = useState(null);
 
+  // Active image slide state
+  const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+
   useEffect(() => {
     async function loadProduct() {
       setLoading(true);
@@ -26,8 +29,8 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
           setProduct(res.data);
 
           if (res.data.variants && res.data.variants.length > 0) {
-            const sizes = [...new Set(res.data.variants.map(v => v.size))];
-            const colors = [...new Set(res.data.variants.map(v => v.color))];
+            const sizes = [...new Set(res.data.variants.map((v) => v.size))];
+            const colors = [...new Set(res.data.variants.map((v) => v.color))];
 
             setSelectedSize(sizes[0] || "");
             setSelectedColor(colors[0] || "");
@@ -53,6 +56,88 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
     setQuantity(1);
   }, [selectedSize, selectedColor, product]);
 
+  // Aggregate product gallery images + all variant images into a unified media list
+  const mediaList = useMemo(() => {
+    if (!product) return [];
+    const items = [];
+    const seen = new Set();
+
+    // 1. Main gallery images
+    const gImages = Array.isArray(product.images) && product.images.length > 0
+      ? product.images
+      : (product.image ? [product.image] : []);
+
+    gImages.forEach((img, idx) => {
+      if (img && !seen.has(img)) {
+        seen.add(img);
+        items.push({
+          url: img,
+          isVariant: false,
+          label: idx === 0 ? "Foto Utama" : `Foto ${idx + 1}`,
+          variant: null,
+        });
+      }
+    });
+
+    // 2. Variant specific images
+    if (product.variants && Array.isArray(product.variants)) {
+      product.variants.forEach((v) => {
+        if (v.image) {
+          if (!seen.has(v.image)) {
+            seen.add(v.image);
+            items.push({
+              url: v.image,
+              isVariant: true,
+              label: `Warna: ${v.color}${v.size && v.size !== "One Size" ? ` (${v.size})` : ""}`,
+              variant: v,
+            });
+          } else {
+            const matched = items.find((it) => it.url === v.image);
+            if (matched && !matched.variant) {
+              matched.variant = v;
+              matched.isVariant = true;
+              matched.label = `Warna: ${v.color}${v.size && v.size !== "One Size" ? ` (${v.size})` : ""}`;
+            }
+          }
+        }
+      });
+    }
+
+    return items;
+  }, [product]);
+
+  // Handle click on thumbnail or slide
+  const handleSelectMedia = (index) => {
+    if (index < 0 || index >= mediaList.length) return;
+    setActiveMediaIndex(index);
+    const media = mediaList[index];
+    if (media?.variant) {
+      if (media.variant.size) setSelectedSize(media.variant.size);
+      if (media.variant.color) setSelectedColor(media.variant.color);
+    }
+  };
+
+  const handlePrevSlide = () => {
+    const nextIdx = activeMediaIndex === 0 ? mediaList.length - 1 : activeMediaIndex - 1;
+    handleSelectMedia(nextIdx);
+  };
+
+  const handleNextSlide = () => {
+    const nextIdx = activeMediaIndex === mediaList.length - 1 ? 0 : activeMediaIndex + 1;
+    handleSelectMedia(nextIdx);
+  };
+
+  // When user selects a color button, if there's a corresponding variant image, slide to it
+  const handleSelectColor = (color) => {
+    setSelectedColor(color);
+    const targetIdx = mediaList.findIndex(
+      (m) => m.variant && m.variant.color.toLowerCase() === color.toLowerCase() && m.url
+    );
+    if (targetIdx !== -1) {
+      setActiveMediaIndex(targetIdx);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8 flex items-center justify-center">
@@ -74,8 +159,8 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
     );
   }
 
-  const availableSizes = [...new Set(product.variants.map(v => v.size))];
-  const availableColors = [...new Set(product.variants.map(v => v.color))];
+  const availableSizes = [...new Set(product.variants.map((v) => v.size))];
+  const availableColors = [...new Set(product.variants.map((v) => v.color))];
 
   const currentPrice = selectedVariant && selectedVariant.price_override !== null
     ? parseFloat(selectedVariant.price_override)
@@ -122,7 +207,8 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
     window.open(waUrl, "_blank");
   };
 
-  const imageUrl = getImageUrl(product.image);
+  const activeMedia = mediaList[activeMediaIndex] || { url: product.image };
+  const currentMainImageUrl = getImageUrl(activeMedia.url);
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 space-y-12">
@@ -135,16 +221,104 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16">
-        {/* Left Side */}
-        <div className="overflow-hidden bg-stone-50 border border-stone-100 flex items-center justify-center">
-          <img
-            src={imageUrl}
-            alt={product.name}
-            className="w-full h-auto aspect-[3/4] object-cover object-center fade-in duration-500"
-          />
+        {/* Left Side: Multiple Images Slide & Thumbnails */}
+        <div className="space-y-4">
+          {/* Main Slide Viewer */}
+          <div className="relative overflow-hidden bg-stone-50 border border-stone-150 aspect-[3/4] group flex items-center justify-center">
+            {/* Preorder badge */}
+            {(product.is_preorder === 1 || product.is_preorder === true) && (
+              <div className="absolute top-4 left-4 z-10 bg-stone-900 text-white text-[9px] font-semibold uppercase tracking-widest px-3 py-1 shadow">
+                Pre-Order: {product.preorder_days || 14} Hari
+              </div>
+            )}
+
+            {/* Active Variant Indicator Badge */}
+            {activeMedia.isVariant && (
+              <div className="absolute bottom-4 left-4 z-10 bg-stone-900/80 backdrop-blur-xs text-white text-[9px] font-medium tracking-wider uppercase px-2.5 py-1 rounded shadow flex items-center space-x-1.5">
+                <Sparkles className="h-3 w-3 text-amber-300" />
+                <span>{activeMedia.label}</span>
+              </div>
+            )}
+
+            {/* Image Slide Counter */}
+            {mediaList.length > 1 && (
+              <div className="absolute top-4 right-4 z-10 bg-stone-900/60 backdrop-blur-xs text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow">
+                {activeMediaIndex + 1} / {mediaList.length}
+              </div>
+            )}
+
+            {/* Current Image */}
+            <img
+              key={activeMedia.url}
+              src={currentMainImageUrl}
+              alt={product.name}
+              className="w-full h-full object-cover object-center fade-in duration-300"
+            />
+
+            {/* Prev / Next Slide Navigation Buttons */}
+            {mediaList.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrevSlide}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20"
+                  aria-label="Foto Sebelumnya"
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextSlide}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20"
+                  aria-label="Foto Berikutnya"
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Thumbnails Row */}
+          {mediaList.length > 1 && (
+            <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-none">
+              <style>{`
+                .scrollbar-none::-webkit-scrollbar {
+                  display: none;
+                }
+                .scrollbar-none {
+                  -ms-overflow-style: none;
+                  scrollbar-width: none;
+                }
+              `}</style>
+              {mediaList.map((item, index) => {
+                const isSelected = activeMediaIndex === index;
+                const thumbUrl = getImageUrl(item.url);
+
+                return (
+                  <button
+                    key={item.url + index}
+                    type="button"
+                    onClick={() => handleSelectMedia(index)}
+                    className={`relative flex-shrink-0 w-16 sm:w-20 aspect-[3/4] rounded overflow-hidden border-2 transition-all duration-200 ${
+                      isSelected
+                        ? "border-stone-900 ring-2 ring-stone-900/30 scale-105 shadow-md"
+                        : "border-stone-200 hover:border-stone-450 opacity-70 hover:opacity-100"
+                    }`}
+                  >
+                    <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
+                    {item.isVariant && (
+                      <span className="absolute bottom-0 inset-x-0 bg-stone-900/85 text-white text-[7px] font-bold uppercase tracking-tight py-0.5 truncate px-1 text-center">
+                        {item.variant?.color || "Varian"}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Right Side */}
+        {/* Right Side: Product Details & Variant Selection */}
         <div className="flex flex-col justify-between space-y-8 py-4">
           <div className="space-y-6">
             <div className="flex flex-wrap items-center gap-2">
@@ -198,7 +372,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                     return (
                       <button
                         key={color}
-                        onClick={() => setSelectedColor(color)}
+                        onClick={() => handleSelectColor(color)}
                         className={`px-4 py-2 text-xs font-medium border uppercase tracking-wider transition-all duration-200 ${isSelected
                             ? "border-stone-900 bg-stone-900 text-white shadow-sm"
                             : "border-stone-200 bg-white text-stone-600 hover:border-stone-400 hover:text-stone-900"
@@ -261,7 +435,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
           <div className="space-y-6">
             {selectedVariant && selectedVariant.stock > 0 && (
               <div className="space-y-4">
-                {/* Fixed Quantity Adjuster layout block (prevents wrapping offset issue completely) */}
+                {/* Fixed Quantity Adjuster layout block */}
                 <div className="flex items-center border border-stone-200 h-14 bg-white max-w-xs">
                   <button
                     onClick={() => setQuantity(Math.max(1, quantity - 1))}
@@ -295,12 +469,11 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                     <span>Tambah ke Keranjang</span>
                   </button>
 
-                  {/* Beli via WhatsApp Option (dynamic whatsapp number link) */}
+                  {/* Beli via WhatsApp Option */}
                   <button
                     onClick={handleBuyWhatsApp}
                     className="w-full sm:flex-1 flex items-center justify-center space-x-3 border border-[#25D366] text-[#25D366] bg-white h-14 text-xs font-semibold uppercase tracking-widest hover:bg-[#25D366] hover:text-white transition-all duration-200"
                   >
-                    {/* SVG WA logo */}
                     <svg className="h-4 w-4 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                       <path d="M12.012 2C6.48 2 2 6.48 2 12.012c0 1.764.456 3.48 1.332 5.004L2 22l5.124-1.332c1.464.792 3.12 1.212 4.888 1.212 5.532 0 10.012-4.48 10.012-10.012C22.024 6.48 17.544 2 12.012 2zm5.736 14.292c-.24.672-1.2 1.236-1.656 1.296-.456.06-1.044.096-1.68-.108-.408-.132-.936-.312-1.572-.588-2.676-1.152-4.404-3.864-4.536-4.044-.132-.18-.996-1.32-.996-2.52 0-1.2.624-1.788.852-2.04.228-.252.504-.312.672-.312.168 0 .336.012.48.024.156.012.36-.048.564.444.204.492.708 1.728.768 1.848.06.12.096.264.012.432-.084.168-.18.276-.3.408-.12.132-.252.276-.36.384-.12.12-.24.252-.108.48.132.228.588.972 1.26 1.572.864.768 1.596 1.008 1.824 1.116.228.108.36.096.492-.048.132-.144.564-.66.72-.888.156-.228.312-.192.528-.108.216.084 1.368.648 1.608.768.24.12.408.18.468.276.06.108.06.612-.18 1.284z" />
                     </svg>

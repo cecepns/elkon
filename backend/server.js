@@ -180,6 +180,19 @@ app.post('/api/upload', verifyToken, upload.single('image'), (req, res) => {
   });
 });
 
+// POST /api/upload-multiple (Admin)
+app.post('/api/upload-multiple', verifyToken, upload.array('images', 10), (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ success: false, message: 'Tidak ada gambar yang diunggah' });
+  }
+  const imageUrls = req.files.map((file) => `/uploads-elkon/${file.filename}`);
+  res.json({
+    success: true,
+    message: 'Gambar berhasil diunggah',
+    imageUrls,
+  });
+});
+
 
 // --- CATEGORIES ROUTES ---
 
@@ -575,6 +588,20 @@ app.get('/api/products', async (req, res) => {
       );
       
       products.forEach(p => {
+        // Parse images if string
+        if (typeof p.images === 'string') {
+          try {
+            p.images = JSON.parse(p.images);
+          } catch (e) {
+            p.images = p.image ? [p.image] : [];
+          }
+        } else if (!Array.isArray(p.images)) {
+          p.images = p.image ? [p.image] : [];
+        }
+        if (p.images.length === 0 && p.image) {
+          p.images = [p.image];
+        }
+
         p.variants = variants.filter(v => v.product_id === p.id);
       });
     }
@@ -611,6 +638,19 @@ app.get('/api/products/:id', async (req, res) => {
     }
 
     const product = products[0];
+    if (typeof product.images === 'string') {
+      try {
+        product.images = JSON.parse(product.images);
+      } catch (e) {
+        product.images = product.image ? [product.image] : [];
+      }
+    } else if (!Array.isArray(product.images)) {
+      product.images = product.image ? [product.image] : [];
+    }
+    if (product.images.length === 0 && product.image) {
+      product.images = [product.image];
+    }
+
     const [variants] = await pool.query('SELECT * FROM product_variants WHERE product_id = ?', [id]);
     product.variants = variants;
 
@@ -623,24 +663,29 @@ app.get('/api/products/:id', async (req, res) => {
 
 // POST /api/products
 app.post('/api/products', verifyToken, async (req, res) => {
-  const { name, description, base_price, image, category_id, status, is_preorder, preorder_days, variants } = req.body;
+  const { name, description, base_price, image, images, category_id, status, is_preorder, preorder_days, variants } = req.body;
 
   if (!name || !base_price || !category_id) {
     return res.status(400).json({ success: false, message: 'Nama, harga dasar, dan kategori wajib diisi' });
   }
+
+  const primaryImage = image || (Array.isArray(images) && images.length > 0 ? images[0] : '');
+  const imagesArray = Array.isArray(images) && images.length > 0 ? images : (primaryImage ? [primaryImage] : []);
+  const imagesJson = JSON.stringify(imagesArray);
 
   const connection = await pool.getConnection();
   await connection.beginTransaction();
 
   try {
     const [prodResult] = await connection.query(
-      `INSERT INTO products (name, description, base_price, image, category_id, status, is_preorder, preorder_days) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO products (name, description, base_price, image, images, category_id, status, is_preorder, preorder_days) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         name,
         description || '',
         base_price,
-        image || '',
+        primaryImage,
+        imagesJson,
         category_id,
         status || 'active',
         is_preorder ? 1 : 0,
@@ -652,7 +697,7 @@ app.post('/api/products', verifyToken, async (req, res) => {
 
     if (variants && Array.isArray(variants) && variants.length > 0) {
       for (const variant of variants) {
-        const { size, color, sku, price_override, stock } = variant;
+        const { size, color, sku, price_override, stock, image: variantImage } = variant;
         if (!size || !color || !sku) {
           throw new Error('Ukuran, warna, dan kode SKU varian wajib diisi');
         }
@@ -663,17 +708,17 @@ app.post('/api/products', verifyToken, async (req, res) => {
         }
 
         await connection.query(
-          `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock) 
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [productId, size, color, sku, price_override || null, stock || 0]
+          `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock, image) 
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [productId, size, color, sku, price_override || null, stock || 0, variantImage || null]
         );
       }
     } else {
       const defaultSku = `ELK-${productId}-${Date.now().toString().slice(-4)}`;
       await connection.query(
-        `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock) 
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [productId, 'One Size', 'Default', defaultSku, null, 1]
+        `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock, image) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [productId, 'One Size', 'Default', defaultSku, null, 1, null]
       );
     }
 
@@ -696,11 +741,15 @@ app.post('/api/products', verifyToken, async (req, res) => {
 // PUT /api/products/:id
 app.put('/api/products/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
-  const { name, description, base_price, image, category_id, status, is_preorder, preorder_days, variants } = req.body;
+  const { name, description, base_price, image, images, category_id, status, is_preorder, preorder_days, variants } = req.body;
 
   if (!name || !base_price || !category_id) {
     return res.status(400).json({ success: false, message: 'Nama, harga dasar, dan kategori wajib diisi' });
   }
+
+  const primaryImage = image || (Array.isArray(images) && images.length > 0 ? images[0] : '');
+  const imagesArray = Array.isArray(images) && images.length > 0 ? images : (primaryImage ? [primaryImage] : []);
+  const imagesJson = JSON.stringify(imagesArray);
 
   const connection = await pool.getConnection();
   await connection.beginTransaction();
@@ -714,13 +763,14 @@ app.put('/api/products/:id', verifyToken, async (req, res) => {
 
     await connection.query(
       `UPDATE products 
-       SET name = ?, description = ?, base_price = ?, image = ?, category_id = ?, status = ?, is_preorder = ?, preorder_days = ? 
+       SET name = ?, description = ?, base_price = ?, image = ?, images = ?, category_id = ?, status = ?, is_preorder = ?, preorder_days = ? 
        WHERE id = ?`,
       [
         name,
         description || '',
         base_price,
-        image || '',
+        primaryImage,
+        imagesJson,
         category_id,
         status || 'active',
         is_preorder ? 1 : 0,
@@ -765,19 +815,19 @@ app.put('/api/products/:id', verifyToken, async (req, res) => {
       }
 
       for (const variant of variants) {
-        const { id: variantId, size, color, sku, price_override, stock } = variant;
+        const { id: variantId, size, color, sku, price_override, stock, image: variantImage } = variant;
         if (variantId) {
           await connection.query(
             `UPDATE product_variants 
-             SET size = ?, color = ?, sku = ?, price_override = ?, stock = ? 
+             SET size = ?, color = ?, sku = ?, price_override = ?, stock = ?, image = ? 
              WHERE id = ? AND product_id = ?`,
-            [size, color, sku, price_override || null, stock || 0, variantId, id]
+            [size, color, sku, price_override || null, stock || 0, variantImage || null, variantId, id]
           );
         } else {
           await connection.query(
-            `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [id, size, color, sku, price_override || null, stock || 0]
+            `INSERT INTO product_variants (product_id, size, color, sku, price_override, stock, image) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [id, size, color, sku, price_override || null, stock || 0, variantImage || null]
           );
         }
       }

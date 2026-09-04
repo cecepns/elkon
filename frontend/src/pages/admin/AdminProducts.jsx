@@ -13,7 +13,9 @@ import {
   Image as ImageIcon,
   Loader2,
   X,
-  Plus as PlusIcon
+  Plus as PlusIcon,
+  Upload,
+  Star
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -49,8 +51,8 @@ export default function AdminProducts({ onActionSuccess }) {
   const [prodPrice, setProdPrice] = useState("");
   const [prodCategoryId, setProdCategoryId] = useState("");
   const [prodStatus, setProdStatus] = useState("active");
-  const [prodImagePreview, setProdImagePreview] = useState("");
-  const [prodImageFile, setProdImageFile] = useState(null);
+  // Multiple Gallery Images: array of { id, url, file, preview }
+  const [prodImages, setProdImages] = useState([]);
   const [prodVariants, setProdVariants] = useState([]);
   // Pre-Order Fields
   const [isPreorder, setIsPreorder] = useState(false);
@@ -131,11 +133,10 @@ export default function AdminProducts({ onActionSuccess }) {
     setProdStatus("active");
     setIsPreorder(false);
     setPreorderDays(30);
-    setProdImagePreview("");
-    setProdImageFile(null);
+    setProdImages([]);
     setProdVariants([
-      { size: "S", color: "Beige", sku: `ELK-${Date.now().toString().slice(-3)}-S`, price_override: "", stock: 10 },
-      { size: "M", color: "Beige", sku: `ELK-${Date.now().toString().slice(-3)}-M`, price_override: "", stock: 15 },
+      { size: "S", color: "Beige", sku: `ELK-${Date.now().toString().slice(-3)}-S`, price_override: "", stock: 10, image: "", imageFile: null, imagePreview: "" },
+      { size: "M", color: "Beige", sku: `ELK-${Date.now().toString().slice(-3)}-M`, price_override: "", stock: 15, image: "", imageFile: null, imagePreview: "" },
     ]);
     setIsProductModalOpen(true);
   };
@@ -150,9 +151,18 @@ export default function AdminProducts({ onActionSuccess }) {
     setIsPreorder(prod.is_preorder === 1 || prod.is_preorder === true);
     setPreorderDays(prod.preorder_days || 14);
 
-    const fullImg = getImageUrl(prod.image);
-    setProdImagePreview(prod.image ? fullImg : "");
-    setProdImageFile(null);
+    const initialImages = Array.isArray(prod.images) && prod.images.length > 0 
+      ? prod.images 
+      : (prod.image ? [prod.image] : []);
+      
+    setProdImages(
+      initialImages.map((imgPath, i) => ({
+        id: `existing-${i}-${Date.now()}`,
+        url: imgPath,
+        file: null,
+        preview: getImageUrl(imgPath),
+      }))
+    );
 
     if (prod.variants && prod.variants.length > 0) {
       setProdVariants(
@@ -162,7 +172,10 @@ export default function AdminProducts({ onActionSuccess }) {
           color: v.color,
           sku: v.sku,
           price_override: v.price_override !== null ? v.price_override.toString() : "",
-          stock: v.stock
+          stock: v.stock,
+          image: v.image || "",
+          imageFile: null,
+          imagePreview: v.image ? getImageUrl(v.image) : "",
         }))
       );
     } else {
@@ -171,26 +184,64 @@ export default function AdminProducts({ onActionSuccess }) {
     setIsProductModalOpen(true);
   };
 
-  function handleImageChange(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    setProdImageFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setProdImagePreview(reader.result);
-    reader.readAsDataURL(file);
+  // Multiple product images handler
+  function handleMultipleImagesChange(e) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const newItems = files.map((file, idx) => ({
+      id: `new-${Date.now()}-${idx}`,
+      url: "",
+      file: file,
+      preview: URL.createObjectURL(file),
+    }));
+
+    setProdImages((prev) => [...prev, ...newItems]);
+    // reset input value so user can re-select same file if desired
+    e.target.value = "";
   }
 
+  function handleRemoveProductImage(idx) {
+    setProdImages((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function handleSetCoverImage(idx) {
+    if (idx === 0) return;
+    setProdImages((prev) => {
+      const copy = [...prev];
+      const [selected] = copy.splice(idx, 1);
+      return [selected, ...copy];
+    });
+  }
+
+  // Variant row actions
   function handleAddVariantRow() {
     const randSuffix = Math.floor(100 + Math.random() * 900);
     setProdVariants([
       ...prodVariants,
-      { size: "S", color: "Default", sku: `ELK-VAR-${randSuffix}`, price_override: "", stock: 10 }
+      { size: "S", color: "Default", sku: `ELK-VAR-${randSuffix}`, price_override: "", stock: 10, image: "", imageFile: null, imagePreview: "" }
     ]);
   }
 
   function handleUpdateVariantField(idx, field, val) {
     const updated = [...prodVariants];
     updated[idx][field] = val;
+    setProdVariants(updated);
+  }
+
+  function handleVariantImageChange(idx, file) {
+    if (!file) return;
+    const updated = [...prodVariants];
+    updated[idx].imageFile = file;
+    updated[idx].imagePreview = URL.createObjectURL(file);
+    setProdVariants(updated);
+  }
+
+  function handleRemoveVariantImage(idx) {
+    const updated = [...prodVariants];
+    updated[idx].image = "";
+    updated[idx].imageFile = null;
+    updated[idx].imagePreview = "";
     setProdVariants(updated);
   }
 
@@ -215,36 +266,62 @@ export default function AdminProducts({ onActionSuccess }) {
 
     setModalLoading(true);
     try {
-      let finalImagePath = editingProduct ? editingProduct.image : "";
-
-      if (prodImageFile) {
-        const formData = new FormData();
-        formData.append("image", prodImageFile);
-        const uploadRes = await api.post(API_ENDPOINTS.UPLOAD, formData, {
-          headers: { "Content-Type": "multipart/form-data" }
-        });
-        if (uploadRes.data.success) {
-          finalImagePath = uploadRes.data.imageUrl;
+      // 1. Upload new product gallery images if any
+      const finalImages = [];
+      for (const item of prodImages) {
+        if (item.file) {
+          const formData = new FormData();
+          formData.append("image", item.file);
+          const uploadRes = await api.post(API_ENDPOINTS.UPLOAD, formData, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
+          if (uploadRes.data.success) {
+            finalImages.push(uploadRes.data.imageUrl);
+          }
+        } else if (item.url) {
+          finalImages.push(item.url);
         }
       }
 
-      const payload = {
-        name: prodName,
-        description: prodDesc,
-        base_price: parseFloat(prodPrice),
-        image: finalImagePath,
-        category_id: parseInt(prodCategoryId),
-        status: prodStatus,
-        is_preorder: isPreorder ? 1 : 0,
-        preorder_days: isPreorder ? parseInt(preorderDays) : null,
-        variants: prodVariants.map(v => ({
+      const primaryImage = finalImages.length > 0 ? finalImages[0] : (editingProduct?.image || "");
+
+      // 2. Upload variant images if any
+      const processedVariants = [];
+      for (const v of prodVariants) {
+        let variantImgUrl = v.image || null;
+        if (v.imageFile) {
+          const formData = new FormData();
+          formData.append("image", v.imageFile);
+          const uploadRes = await api.post(API_ENDPOINTS.UPLOAD, formData, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
+          if (uploadRes.data.success) {
+            variantImgUrl = uploadRes.data.imageUrl;
+          }
+        }
+
+        processedVariants.push({
           id: v.id,
           size: v.size.trim(),
           color: v.color.trim(),
           sku: v.sku.trim(),
           price_override: v.price_override ? parseFloat(v.price_override) : null,
           stock: parseInt(v.stock) || 0,
-        }))
+          image: variantImgUrl,
+        });
+      }
+
+      const payload = {
+        name: prodName,
+        description: prodDesc,
+        base_price: parseFloat(prodPrice),
+        image: primaryImage,
+        images: finalImages,
+        category_id: parseInt(prodCategoryId),
+        status: prodStatus,
+        is_preorder: isPreorder ? 1 : 0,
+        preorder_days: isPreorder ? parseInt(preorderDays) : null,
+        variants: processedVariants,
       };
 
       if (editingProduct) {
@@ -266,7 +343,7 @@ export default function AdminProducts({ onActionSuccess }) {
       }
     } catch (err) {
       console.error(err);
-      toast.error("Gagal menyimpan produk.");
+      toast.error(err?.response?.data?.message || err?.message || "Gagal menyimpan produk.");
     } finally {
       setModalLoading(false);
     }
@@ -633,29 +710,94 @@ export default function AdminProducts({ onActionSuccess }) {
                   </div>
 
                   <div className="flex flex-col justify-start space-y-4">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500">Gambar Cover Produk</label>
-                      <div className="border border-dashed border-stone-255 bg-stone-50/50 p-4 rounded flex flex-col items-center justify-center text-center space-y-2 h-[200px] relative overflow-hidden">
-                        {prodImagePreview ? (
-                          <>
-                            <img src={prodImagePreview} alt="" className="absolute inset-0 h-full w-full object-cover" />
-                            <div className="absolute inset-0 bg-black/10 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
-                              <span className="bg-white/90 text-stone-900 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider shadow">Ganti Foto</span>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <ImageIcon className="h-8 w-8 text-stone-300" />
-                            <span className="text-[11px] text-stone-400 font-light">Pilih berkas JPG/PNG gambar produk</span>
-                          </>
-                        )}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="absolute inset-0 opacity-0 cursor-pointer"
-                          onChange={handleImageChange}
-                        />
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-stone-500">
+                          Galeri Foto Produk ({prodImages.length})
+                        </label>
+                        <label className="inline-flex items-center space-x-1 text-[10px] font-semibold text-stone-900 uppercase tracking-wider bg-stone-100 hover:bg-stone-200 px-2.5 py-1 cursor-pointer transition-colors">
+                          <Plus className="h-3 w-3" />
+                          <span>Tambah Foto</span>
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleMultipleImagesChange}
+                          />
+                        </label>
                       </div>
+
+                      {prodImages.length === 0 ? (
+                        <label className="border-2 border-dashed border-stone-250 bg-stone-50/50 p-6 rounded flex flex-col items-center justify-center text-center space-y-2 h-[150px] relative overflow-hidden cursor-pointer hover:bg-stone-100/60 transition-colors">
+                          <ImageIcon className="h-8 w-8 text-stone-300" />
+                          <span className="text-[11px] text-stone-500 font-medium">Klik untuk unggah satu atau beberapa foto produk</span>
+                          <span className="text-[9px] text-stone-400">Format JPG, PNG, WEBP didukung</span>
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            className="hidden"
+                            onChange={handleMultipleImagesChange}
+                          />
+                        </label>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2.5 max-h-[160px] overflow-y-auto p-1 bg-stone-50/50 border border-stone-200 rounded">
+                          {prodImages.map((img, idx) => (
+                            <div
+                              key={img.id || idx}
+                              className={`relative aspect-[3/4] group rounded overflow-hidden border ${
+                                idx === 0 ? "border-stone-900 ring-1 ring-stone-900" : "border-stone-200 bg-white"
+                              }`}
+                            >
+                              <img src={img.preview} alt="" className="h-full w-full object-cover" />
+                              
+                              {/* Cover Badge */}
+                              {idx === 0 && (
+                                <span className="absolute top-1 left-1 bg-stone-900 text-white text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shadow">
+                                  Cover
+                                </span>
+                              )}
+
+                              {/* Hover Overlay Actions */}
+                              <div className="absolute inset-0 bg-stone-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1.5">
+                                <div className="flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveProductImage(idx)}
+                                    className="p-1 bg-red-600 text-white rounded hover:bg-red-700 shadow"
+                                    title="Hapus foto"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </div>
+                                {idx !== 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetCoverImage(idx)}
+                                    className="w-full py-1 bg-white text-stone-900 text-[8px] font-bold uppercase tracking-wider hover:bg-stone-100 shadow flex items-center justify-center space-x-1 rounded"
+                                  >
+                                    <Star className="h-2.5 w-2.5" />
+                                    <span>Set Cover</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                          {/* Upload More Box */}
+                          <label className="aspect-[3/4] border border-dashed border-stone-300 hover:border-stone-600 bg-white flex flex-col items-center justify-center cursor-pointer rounded text-stone-400 hover:text-stone-700 transition-colors">
+                            <Plus className="h-5 w-5" />
+                            <span className="text-[9px] font-semibold uppercase tracking-wider mt-1">+ Foto</span>
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleMultipleImagesChange}
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1">
@@ -677,8 +819,8 @@ export default function AdminProducts({ onActionSuccess }) {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-xs font-bold uppercase tracking-widest text-stone-900">Konfigurasi Varian Kombinasi</h4>
-                      <p className="text-[10px] text-stone-450">Tentukan ukuran, warna, kode SKU unik, harga override varian, dan persediaan unit.</p>
+                      <h4 className="text-xs font-bold uppercase tracking-widest text-stone-900">Konfigurasi Varian Kombinasi & Foto</h4>
+                      <p className="text-[10px] text-stone-450">Tentukan ukuran, warna, kode SKU unik, harga override varian, persediaan unit, serta foto spesifik varian.</p>
                     </div>
                     <button
                       type="button"
@@ -690,22 +832,49 @@ export default function AdminProducts({ onActionSuccess }) {
                     </button>
                   </div>
 
-                  <div className="border border-stone-200 rounded max-h-[180px] overflow-y-auto">
+                  <div className="border border-stone-200 rounded max-h-[220px] overflow-y-auto">
                     <table className="min-w-full divide-y divide-stone-200 text-left text-xs bg-white">
                       <thead className="bg-stone-50 font-bold uppercase tracking-wider text-stone-550 text-[9px] sticky top-0 z-10">
                         <tr>
-                          <th className="px-4 py-2.5">Ukuran</th>
-                          <th className="px-4 py-2.5">Warna</th>
-                          <th className="px-4 py-2.5">Kode SKU</th>
-                          <th className="px-4 py-2.5">Harga Override</th>
-                          <th className="px-4 py-2.5">Stok Unit</th>
-                          <th className="px-4 py-2.5 text-right">Hapus</th>
+                          <th className="px-3 py-2.5">Foto Varian</th>
+                          <th className="px-3 py-2.5">Ukuran</th>
+                          <th className="px-3 py-2.5">Warna</th>
+                          <th className="px-3 py-2.5">Kode SKU</th>
+                          <th className="px-3 py-2.5">Harga Override</th>
+                          <th className="px-3 py-2.5">Stok Unit</th>
+                          <th className="px-3 py-2.5 text-right">Hapus</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-150">
                         {prodVariants.map((v, index) => (
                           <tr key={index}>
-                            <td className="px-4 py-1">
+                            {/* Variant Image Column */}
+                            <td className="px-3 py-1.5">
+                              {v.imagePreview ? (
+                                <div className="relative group h-10 w-9 border border-stone-300 rounded overflow-hidden">
+                                  <img src={v.imagePreview} alt="" className="h-full w-full object-cover" />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveVariantImage(index)}
+                                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                                    title="Hapus foto varian"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="h-10 w-9 border border-dashed border-stone-300 hover:border-stone-600 rounded bg-stone-50 flex items-center justify-center cursor-pointer text-stone-400 hover:text-stone-700 transition-colors">
+                                  <Upload className="h-3.5 w-3.5" />
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={(e) => handleVariantImageChange(index, e.target.files[0])}
+                                  />
+                                </label>
+                              )}
+                            </td>
+                            <td className="px-3 py-1">
                               <input
                                 type="text"
                                 required
@@ -714,7 +883,7 @@ export default function AdminProducts({ onActionSuccess }) {
                                 onChange={(e) => handleUpdateVariantField(index, "size", e.target.value)}
                               />
                             </td>
-                            <td className="px-4 py-1">
+                            <td className="px-3 py-1">
                               <input
                                 type="text"
                                 required
@@ -723,25 +892,25 @@ export default function AdminProducts({ onActionSuccess }) {
                                 onChange={(e) => handleUpdateVariantField(index, "color", e.target.value)}
                               />
                             </td>
-                            <td className="px-4 py-1">
+                            <td className="px-3 py-1">
                               <input
                                 type="text"
                                 required
-                                className="w-36 border border-stone-200 px-2 py-1 text-xs font-mono focus:outline-none"
+                                className="w-32 border border-stone-200 px-2 py-1 text-xs font-mono focus:outline-none"
                                 value={v.sku}
                                 onChange={(e) => handleUpdateVariantField(index, "sku", e.target.value)}
                               />
                             </td>
-                            <td className="px-4 py-1">
+                            <td className="px-3 py-1">
                               <input
                                 type="number"
                                 className="w-28 border border-stone-200 px-2 py-1 text-xs focus:outline-none"
-                                placeholder="Pakai harga dasar"
+                                placeholder="Pakai dasar"
                                 value={v.price_override}
                                 onChange={(e) => handleUpdateVariantField(index, "price_override", e.target.value)}
                               />
                             </td>
-                            <td className="px-4 py-1">
+                            <td className="px-3 py-1">
                               <input
                                 type="number"
                                 required
@@ -751,7 +920,7 @@ export default function AdminProducts({ onActionSuccess }) {
                                 onChange={(e) => handleUpdateVariantField(index, "stock", parseInt(e.target.value) || 0)}
                               />
                             </td>
-                            <td className="px-4 py-1 text-right">
+                            <td className="px-3 py-1 text-right">
                               <button
                                 type="button"
                                 onClick={() => handleRemoveVariantRow(index)}

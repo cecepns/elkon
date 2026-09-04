@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
-import { Search, ChevronLeft, ChevronRight, Inbox, ChevronDown } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight, Inbox, ChevronDown, ArrowRight } from "lucide-react";
 
 export default function Shop() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -274,41 +274,58 @@ export default function Shop() {
             const imageUrl = getImageUrl(product.image);
 
             return (
-              <div key={product.id} className="group space-y-4 md:space-y-6 fade-in">
-                <Link to={`/product/${product.id}`} className="block overflow-hidden bg-stone-50 border border-stone-100">
-                  <div className="relative aspect-[3/4] overflow-hidden">
-                    {(product.is_preorder === 1 || product.is_preorder === true) && (
-                      <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
-                        Pre-Order: {product.preorder_days || 14} Hari
-                      </div>
-                    )}
-                    <img
-                      src={imageUrl}
-                      alt={product.name}
-                      className="h-full w-full object-cover object-center transition-transform duration-[1.2s] ease-out group-hover:scale-[1.04]"
-                    />
-                    <div className="absolute inset-0 bg-stone-900/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                </Link>
+              <div key={product.id} className="group space-y-3 sm:space-y-4 fade-in flex flex-col justify-between">
+                <div className="space-y-3">
+                  <Link to={`/product/${product.id}`} className="block overflow-hidden bg-stone-50 border border-stone-100">
+                    <div className="relative aspect-[3/4] overflow-hidden">
+                      {(product.is_preorder === 1 || product.is_preorder === true) && (
+                        <div className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm">
+                          Pre-Order: {product.preorder_days || 14} Hari
+                        </div>
+                      )}
+                      <img
+                        src={imageUrl}
+                        alt={product.name}
+                        className="h-full w-full object-cover object-center transition-transform duration-[1.2s] ease-out group-hover:scale-[1.04]"
+                      />
+                      <div className="absolute inset-0 bg-stone-900/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  </Link>
 
-                <div className="space-y-1.5 md:space-y-2">
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-[9px] md:text-[10px] font-semibold tracking-wider uppercase text-stone-450">
-                      {product.category || "Tanpa Kategori"}
-                    </span>
-                    <span className="text-[9px] md:text-[10px] font-medium tracking-wider uppercase text-stone-400">
-                      {product.variants ? `${product.variants.length} Varian` : ""}
-                    </span>
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-[9px] md:text-[10px] font-semibold tracking-wider uppercase text-stone-450">
+                        {product.category || "Tanpa Kategori"}
+                      </span>
+                      <span className="text-[9px] md:text-[10px] font-medium tracking-wider uppercase text-stone-400">
+                        {product.variants ? `${product.variants.length} Varian` : ""}
+                      </span>
+                    </div>
+                    <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-1">
+                      <h3 className="font-serif text-sm md:text-lg font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-1">
+                        <Link to={`/product/${product.id}`}>{product.name}</Link>
+                      </h3>
+                      <p className="text-[11px] md:text-xs font-semibold text-stone-900 whitespace-nowrap">{formatPrice(product.base_price)}</p>
+                    </div>
+
+                    {/* Truncate description max 4 lines */}
+                    {product.description && (
+                      <p className="text-xs text-stone-500 font-light line-clamp-4 leading-relaxed">
+                        {product.description}
+                      </p>
+                    )}
                   </div>
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-baseline">
-                    <h3 className="font-serif text-sm md:text-lg font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-1">
-                      <Link to={`/product/${product.id}`}>{product.name}</Link>
-                    </h3>
-                    <p className="text-[11px] md:text-xs font-semibold text-stone-900 whitespace-nowrap">{formatPrice(product.base_price)}</p>
-                  </div>
-                  <p className="hidden sm:block text-xs text-stone-500 font-light line-clamp-2 leading-relaxed">
-                    {product.description}
-                  </p>
+                </div>
+
+                {/* Lihat Selengkapnya link */}
+                <div className="pt-1">
+                  <Link
+                    to={`/product/${product.id}`}
+                    className="inline-flex items-center space-x-1.5 text-xs font-medium uppercase tracking-wider text-stone-900 hover:text-stone-600 hover:underline transition-colors"
+                  >
+                    <span>Lihat Selengkapnya</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </Link>
                 </div>
               </div>
             );

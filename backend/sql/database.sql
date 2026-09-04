@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS products (
   description TEXT,
   base_price DECIMAL(12, 2) NOT NULL,
   image VARCHAR(255),
+  images JSON NULL,
   category_id INT,
   status VARCHAR(20) DEFAULT 'active', -- active, draft
   is_preorder TINYINT(1) DEFAULT 0,
@@ -37,7 +38,7 @@ CREATE TABLE IF NOT EXISTS products (
   FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL
 );
 
--- Product Variants table (Size, Color, SKU, Price Override, Stock)
+-- Product Variants table (Size, Color, SKU, Price Override, Stock, Variant Image)
 CREATE TABLE IF NOT EXISTS product_variants (
   id INT AUTO_INCREMENT PRIMARY KEY,
   product_id INT NOT NULL,
@@ -46,6 +47,7 @@ CREATE TABLE IF NOT EXISTS product_variants (
   sku VARCHAR(100) NOT NULL UNIQUE,
   price_override DECIMAL(12, 2) NULL, -- if null, use base_price from product
   stock INT NOT NULL DEFAULT 0,
+  image VARCHAR(255) NULL,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 );
 
