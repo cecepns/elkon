@@ -1,15 +1,20 @@
 import React, { useState } from "react";
-import { X, Trash2, Plus, Minus, CreditCard, ShoppingBag } from "lucide-react";
+import { X, Trash2, Plus, Minus, CreditCard, ShoppingBag, Loader2 } from "lucide-react";
 import { getImageUrl } from "../utils/api";
+import { request } from "../utils/request";
+import { API_ENDPOINTS } from "../utils/endpoints";
 import toast from "react-hot-toast";
 
 export default function CartDrawer({ isOpen, onClose, cartItems, onUpdateQuantity, onRemoveItem, onClearCart }) {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [shippingInfo, setShippingInfo] = useState({
     name: "",
+    email: "",
     address: "",
     city: "",
     phone: "",
+    notes: "",
   });
 
   if (!isOpen) return null;
@@ -27,25 +32,48 @@ export default function CartDrawer({ isOpen, onClose, cartItems, onUpdateQuantit
     }).format(price);
   };
 
-  const handleCheckoutSubmit = (e) => {
+  const handleCheckoutSubmit = async (e) => {
     e.preventDefault();
     if (!shippingInfo.name || !shippingInfo.address || !shippingInfo.city || !shippingInfo.phone) {
       toast.error("Silakan lengkapi semua data pengiriman.");
       return;
     }
+    if (cartItems.length === 0) {
+      toast.error("Keranjang Anda masih kosong.");
+      return;
+    }
 
-    const toastId = toast.loading("Memproses pesanan premium Anda...");
+    setIsSubmitting(true);
+    const toastId = toast.loading("Membuat pesanan & menyiapkan pembayaran...");
 
-    // Simulate transaction delay
-    setTimeout(() => {
-      toast.success(`Terima kasih, ${shippingInfo.name}! Pesanan Anda berhasil dibuat.`, {
-        id: toastId,
-        duration: 5000,
+    try {
+      const res = await request.post(API_ENDPOINTS.ORDERS.CREATE, {
+        buyer_name: shippingInfo.name,
+        buyer_phone: shippingInfo.phone,
+        buyer_email: shippingInfo.email,
+        address: shippingInfo.address,
+        city: shippingInfo.city,
+        notes: shippingInfo.notes,
+        items: cartItems.map((item) => ({
+          variant_id: item.variant.id,
+          quantity: item.quantity,
+        })),
       });
-      onClearCart();
-      setIsCheckingOut(false);
-      onClose();
-    }, 2000);
+
+      if (res.success && res.data?.payment_url) {
+        toast.success("Pesanan dibuat! Mengarahkan ke halaman pembayaran...", { id: toastId });
+        onClearCart();
+        window.location.href = res.data.payment_url;
+        return;
+      }
+
+      toast.error("Gagal membuat pesanan. Silakan coba lagi.", { id: toastId });
+    } catch (error) {
+      // Pesan error spesifik sudah ditampilkan oleh request helper (toast)
+      toast.dismiss(toastId);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -122,6 +150,17 @@ export default function CartDrawer({ isOpen, onClose, cartItems, onUpdateQuantit
                     </div>
 
                     <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500 mb-1">Email (opsional)</label>
+                      <input
+                        type="email"
+                        className="w-full bg-white border border-stone-200 px-3 py-2 text-sm text-stone-950 focus:border-stone-900 focus:outline-none transition-all"
+                        placeholder="cth. nama@email.com"
+                        value={shippingInfo.email}
+                        onChange={(e) => setShippingInfo({ ...shippingInfo, email: e.target.value })}
+                      />
+                    </div>
+
+                    <div>
                       <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500 mb-1">Alamat Lengkap</label>
                       <textarea
                         required
@@ -144,14 +183,39 @@ export default function CartDrawer({ isOpen, onClose, cartItems, onUpdateQuantit
                         onChange={(e) => setShippingInfo({ ...shippingInfo, city: e.target.value })}
                       />
                     </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500 mb-1">Catatan (opsional)</label>
+                      <textarea
+                        rows="2"
+                        className="w-full bg-white border border-stone-200 px-3 py-2 text-sm text-stone-950 focus:border-stone-900 focus:outline-none transition-all"
+                        placeholder="cth. warna cadangan, patokan alamat, atau permintaan khusus"
+                        value={shippingInfo.notes}
+                        onChange={(e) => setShippingInfo({ ...shippingInfo, notes: e.target.value })}
+                      />
+                    </div>
                   </div>
+
+                  <p className="text-[11px] text-stone-400 leading-relaxed">
+                    Setelah menekan tombol di bawah, Anda akan diarahkan ke halaman pembayaran iPaymu (VA bank, QRIS, e-wallet).
+                  </p>
 
                   <button
                     type="submit"
-                    className="w-full flex items-center justify-center space-x-2 bg-stone-900 px-6 py-4 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black transition-all duration-200 mt-6"
+                    disabled={isSubmitting}
+                    className="w-full flex items-center justify-center space-x-2 bg-stone-900 px-6 py-4 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    <CreditCard className="h-4 w-4" />
-                    <span>Buat Pesanan</span>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>Memproses...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard className="h-4 w-4" />
+                        <span>Buat Pesanan &amp; Bayar</span>
+                      </>
+                    )}
                   </button>
                 </form>
               ) : cartItems.length === 0 ? (

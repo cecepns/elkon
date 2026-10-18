@@ -23,6 +23,18 @@ export const API_ENDPOINTS = {
     UPDATE_STATUS: (id) => `/contacts/${id}`,
     DELETE: (id) => `/contacts/${id}`,
   },
+  ORDERS: {
+    CREATE: "/orders",
+    LIST: "/orders",
+    DETAIL: (id) => `/orders/${id}`,
+    UPDATE_STATUS: (id) => `/orders/${id}/status`,
+    BY_REFERENCE: (referenceId) => `/orders/reference/${referenceId}`,
+  },
+  SETTINGS: {
+    PUBLIC: "/settings",
+    ADMIN: "/settings/admin",
+    UPDATE: "/settings",
+  },
   ADMIN: {
     STATS: "/admin/stats",
   },

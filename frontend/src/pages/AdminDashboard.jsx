@@ -7,11 +7,12 @@ import AdminStats from "./admin/AdminStats";
 import AdminProducts from "./admin/AdminProducts";
 import AdminCategories from "./admin/AdminCategories";
 import AdminBanners from "./admin/AdminBanners";
+import AdminOrders from "./admin/AdminOrders";
 import AdminContacts from "./admin/AdminContacts";
 import AdminSettings from "./admin/AdminSettings";
 
 export default function AdminDashboard() {
-  // Navigation tab states: products, categories, banners, contacts, settings
+  // Navigation tab states: products, categories, banners, orders, contacts, settings
   const [activeTab, setActiveTab] = useState("products");
 
   // Stats dashboard state
@@ -22,7 +23,9 @@ export default function AdminDashboard() {
     totalCategories: 0,
     unreadContacts: 0,
     totalContacts: 0,
-    totalBanners: 0
+    totalBanners: 0,
+    totalOrders: 0,
+    pendingOrders: 0
   });
 
   // Fetch Dynamic Global Stats
@@ -84,6 +87,21 @@ export default function AdminDashboard() {
           Banner Swiper ({stats.totalBanners})
         </button>
         <button
+          onClick={() => { setActiveTab("orders"); }}
+          className={`relative px-6 py-3.5 text-xs font-semibold uppercase tracking-wider border-b-2 whitespace-nowrap transition-all ${
+            activeTab === "orders"
+              ? "border-stone-900 text-stone-900"
+              : "border-transparent text-stone-400 hover:text-stone-700"
+          }`}
+        >
+          Pesanan ({stats.totalOrders})
+          {stats.pendingOrders > 0 && (
+            <span className="absolute top-2 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+              {stats.pendingOrders}
+            </span>
+          )}
+        </button>
+        <button
           onClick={() => { setActiveTab("contacts"); }}
           className={`relative px-6 py-3.5 text-xs font-semibold uppercase tracking-wider border-b-2 whitespace-nowrap transition-all ${
             activeTab === "contacts"
@@ -123,6 +141,9 @@ export default function AdminDashboard() {
         )}
         {activeTab === "banners" && (
           <AdminBanners onActionSuccess={fetchStats} />
+        )}
+        {activeTab === "orders" && (
+          <AdminOrders onActionSuccess={fetchStats} />
         )}
         {activeTab === "contacts" && (
           <AdminContacts onActionSuccess={fetchStats} />
