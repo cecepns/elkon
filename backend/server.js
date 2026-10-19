@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -13,6 +14,8 @@ const PORT = process.env.PORT || 5000;
 // Middleware
 app.use(cors());
 app.use(express.json());
+// iPaymu mengirim callback dalam format x-www-form-urlencoded (default) atau JSON
+app.use(express.urlencoded({ extended: true }));
 app.use('/uploads-elkon', express.static(path.join(__dirname, 'uploads-elkon')));
 
 // Database connection pool
@@ -434,10 +437,10 @@ app.delete('/api/banners/:id', verifyToken, async (req, res) => {
 
 // --- SETTINGS ROUTES ---
 
-// GET /api/settings (Public - returns object maps)
+// GET /api/settings (Public - tanpa kredensial payment gateway)
 app.get('/api/settings', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT key_name, value_text FROM settings');
+    const [rows] = await pool.query("SELECT key_name, value_text FROM settings WHERE key_name NOT LIKE 'ipaymu%'");
     const settingsMap = {};
     rows.forEach(r => {
       settingsMap[r.key_name] = r.value_text;
@@ -449,11 +452,46 @@ app.get('/api/settings', async (req, res) => {
   }
 });
 
+// GET /api/settings/admin (Admin - menyertakan kredensial payment gateway)
+app.get('/api/settings/admin', verifyToken, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT key_name, value_text FROM settings');
+    const settingsMap = {};
+    rows.forEach(r => {
+      settingsMap[r.key_name] = r.value_text;
+    });
+    res.json({ success: true, data: settingsMap });
+  } catch (error) {
+    console.error('Get admin settings error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil pengaturan' });
+  }
+});
+
 // PUT /api/settings (Admin)
 app.put('/api/settings', verifyToken, async (req, res) => {
-  const settingsObj = req.body; // e.g. { whatsapp_number: '62...' }
+  const settingsObj = req.body; // e.g. { whatsapp_number: '62...' } atau { ipaymu_va: '...' }
   if (!settingsObj || Object.keys(settingsObj).length === 0) {
     return res.status(400).json({ success: false, message: 'Data pengaturan tidak boleh kosong' });
+  }
+
+  // Validasi khusus pengaturan payment gateway & URL
+  for (const [key, val] of Object.entries(settingsObj)) {
+    const valueText = typeof val === 'string' ? val.trim() : String(val ?? '');
+    if (key === 'ipaymu_env' && valueText && !['sandbox', 'production'].includes(valueText.toLowerCase())) {
+      return res.status(400).json({ success: false, message: "Mode iPaymu harus 'sandbox' atau 'production'" });
+    }
+    if ((key === 'site_url' || key === 'ipaymu_notify_url') && valueText && !/^https?:\/\//i.test(valueText)) {
+      return res.status(400).json({
+        success: false,
+        message: `URL ${key === 'site_url' ? 'Website Toko' : 'Callback'} harus diawali http:// atau https://`,
+      });
+    }
+    if (key === 'ipaymu_va' && valueText && !/^[0-9]+$/.test(valueText)) {
+      return res.status(400).json({ success: false, message: 'Nomor VA iPaymu hanya boleh berisi angka' });
+    }
+    if (key === 'business_email' && valueText && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valueText)) {
+      return res.status(400).json({ success: false, message: 'Format email bisnis tidak valid' });
+    }
   }
 
   const connection = await pool.getConnection();
@@ -461,7 +499,9 @@ app.put('/api/settings', verifyToken, async (req, res) => {
 
   try {
     for (const [key, val] of Object.entries(settingsObj)) {
-      const valueText = typeof val === "string" ? val.trim() : String(val);
+      let valueText = typeof val === "string" ? val.trim() : String(val);
+      if (key === 'ipaymu_env') valueText = valueText.toLowerCase();
+      if (key === 'site_url') valueText = valueText.replace(/\/+$/, '');
       await connection.query(
         'INSERT INTO settings (key_name, value_text) VALUES (?, ?) ON DUPLICATE KEY UPDATE value_text = ?',
         [key, valueText, valueText]
@@ -489,6 +529,8 @@ app.get('/api/admin/stats', verifyToken, async (req, res) => {
     const [[{ unreadContacts }]] = await pool.query("SELECT COUNT(*) as unreadContacts FROM contacts WHERE status = 'unread'");
     const [[{ totalContacts }]] = await pool.query("SELECT COUNT(*) as totalContacts FROM contacts");
     const [[{ totalBanners }]] = await pool.query("SELECT COUNT(*) as totalBanners FROM banners");
+    const [[{ totalOrders }]] = await pool.query("SELECT COUNT(*) as totalOrders FROM orders");
+    const [[{ pendingOrders }]] = await pool.query("SELECT COUNT(*) as pendingOrders FROM orders WHERE status = 'pending'");
 
     res.json({
       success: true,
@@ -499,7 +541,9 @@ app.get('/api/admin/stats', verifyToken, async (req, res) => {
         totalCategories,
         unreadContacts,
         totalContacts,
-        totalBanners
+        totalBanners,
+        totalOrders,
+        pendingOrders
       }
     });
   } catch (error) {
@@ -586,7 +630,7 @@ app.get('/api/products', async (req, res) => {
         'SELECT * FROM product_variants WHERE product_id IN (?)',
         [productIds]
       );
-      
+
       products.forEach(p => {
         // Parse images if string
         if (typeof p.images === 'string') {
@@ -630,7 +674,7 @@ app.get('/api/products/:id', async (req, res) => {
       `SELECT p.*, c.name as category 
        FROM products p 
        LEFT JOIN categories c ON p.category_id = c.id 
-       WHERE p.id = ?`, 
+       WHERE p.id = ?`,
       [id]
     );
     if (products.length === 0) {
@@ -861,6 +905,605 @@ app.delete('/api/products/:id', verifyToken, async (req, res) => {
     res.status(500).json({ success: false, message: 'Gagal menghapus produk' });
   }
 });
+
+// --- IPAYMU PAYMENT GATEWAY (konfigurasi & helper) ---
+// Kredensial TIDAK di-hardcode: dibaca dari tabel `settings` dan diatur
+// dari dashboard admin (tab Setting > bagian Payment Gateway).
+
+async function getIpaymuConfig() {
+  const [rows] = await pool.query(
+    "SELECT key_name, value_text FROM settings WHERE key_name IN ('ipaymu_env', 'ipaymu_va', 'ipaymu_api_key', 'ipaymu_notify_url', 'site_url')"
+  );
+  const map = {};
+  rows.forEach((r) => {
+    map[r.key_name] = String(r.value_text || '').trim();
+  });
+
+  const isProduction = (map.ipaymu_env || 'sandbox').toLowerCase() === 'production';
+  const defaultBaseUrl = isProduction ? 'https://my.ipaymu.com/api/v2' : 'https://sandbox.ipaymu.com/api/v2';
+  return {
+    // IPAYMU_BASE_URL hanya untuk debug/testing lokal (opsional) — bukan kredensial
+    baseUrl: (process.env.IPAYMU_BASE_URL || defaultBaseUrl).replace(/\/+$/, ''),
+    va: map.ipaymu_va || '',
+    apiKey: map.ipaymu_api_key || '',
+    siteUrl: (map.site_url || '').replace(/\/+$/, ''),
+    notifyUrl: map.ipaymu_notify_url || '',
+    isProduction,
+  };
+}
+
+async function isIpaymuConfigured() {
+  const { va, apiKey } = await getIpaymuConfig();
+  return Boolean(va && apiKey);
+}
+
+// Origin request saat ini — fallback jika `site_url` belum diatur di Setting admin
+function getRequestOrigin(req) {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const proto = forwardedProto || req.protocol || 'http';
+  const host = forwardedHost || String(req.get('host') || '').trim();
+  return host ? `${proto}://${host}` : '';
+}
+
+// Timestamp request iPaymu: YYYYMMDDHHmmss (waktu lokal server)
+function formatIpaymuTimestamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    date.getFullYear().toString() +
+    pad(date.getMonth() + 1) +
+    pad(date.getDate()) +
+    pad(date.getHours()) +
+    pad(date.getMinutes()) +
+    pad(date.getSeconds())
+  );
+}
+
+// Signature request iPaymu v2:
+//   String to Sign = Method + ":" + VA + ":" + SHA256(bodyJson) + ":" + ApiKey
+//   Signature      = HMAC-SHA256(String to Sign, ApiKey)
+function buildIpaymuRequestSignature(method, va, apiKey, bodyJson) {
+  const bodyHash = crypto.createHash('sha256').update(bodyJson).digest('hex');
+  const stringToSign = `${method}:${va}:${bodyHash}:${apiKey}`;
+  return crypto.createHmac('sha256', apiKey).update(stringToSign).digest('hex');
+}
+
+// Normalisasi payload callback sesuai dokumentasi resmi iPaymu sebelum validasi signature
+function normalizeIpaymuCallbackData(rawData) {
+  const result = {};
+  for (const key of Object.keys(rawData)) {
+    const val = rawData[key];
+    if (key === 'signature') continue; // field signature tidak ikut dihitung
+    if (key === 'is_escrow') {
+      result[key] = val === 'true' || val === '1' || val === 1 || val === true;
+    } else if (['trx_id', 'status_code', 'transaction_status_code', 'paid_off'].includes(key)) {
+      const parsed = parseInt(val, 10);
+      result[key] = Number.isNaN(parsed) ? 0 : parsed;
+    } else if (key === 'additional_info') {
+      result[key] = val === '[]' ? [] : val;
+    } else {
+      result[key] = String(val);
+    }
+  }
+  if (!Object.prototype.hasOwnProperty.call(result, 'additional_info')) {
+    result['additional_info'] = [];
+  }
+  return result;
+}
+
+// Urutkan key A-Z (meniru ksort milik PHP)
+function sortObjectKeysAlphabetically(obj) {
+  return Object.keys(obj)
+    .sort((a, b) => a.localeCompare(b))
+    .reduce((acc, key) => {
+      acc[key] = obj[key];
+      return acc;
+    }, {});
+}
+
+// Validasi header X-Signature callback: HMAC-SHA256(json ternormalisasi, secret = Nomor VA)
+function isValidIpaymuCallbackSignature(rawData, receivedSignature, va) {
+  if (!receivedSignature) return false;
+  const sorted = sortObjectKeysAlphabetically(normalizeIpaymuCallbackData(rawData));
+  let jsonBody = JSON.stringify(sorted);
+  jsonBody = jsonBody.replace(/\//g, '\\/');
+  const expected = crypto.createHmac('sha256', va).update(jsonBody).digest('hex');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const receivedBuf = Buffer.from(String(receivedSignature), 'utf8');
+  if (expectedBuf.length !== receivedBuf.length) return false;
+  return crypto.timingSafeEqual(expectedBuf, receivedBuf);
+}
+
+// Buat sesi pembayaran Redirect di iPaymu -> { sessionId, paymentUrl }
+async function createIpaymuPaymentSession({ referenceId, items, buyer, fallbackOrigin }) {
+  const { baseUrl, va, apiKey, siteUrl, notifyUrl } = await getIpaymuConfig();
+
+  // URL toko untuk returnUrl/cancelUrl: dari Setting admin, fallback ke origin request
+  const appUrl = siteUrl || fallbackOrigin || '';
+  if (!appUrl) {
+    const paymentError = new Error('URL Website Toko belum diatur. Isi di Admin > Setting > Payment Gateway.');
+    paymentError.isPaymentError = true;
+    throw paymentError;
+  }
+
+  const body = {
+    product: items.map((item) => item.product_name),
+    qty: items.map((item) => String(item.quantity)),
+    price: items.map((item) => String(Math.round(Number(item.price)))),
+    description: items.map((item) => `${item.variant_size || '-'} / ${item.variant_color || '-'}${item.sku ? ` (${item.sku})` : ''}`),
+    returnUrl: `${appUrl}/order/${referenceId}`,
+    notifyUrl: notifyUrl || `${appUrl}/api/ipaymu/callback`,
+    cancelUrl: `${appUrl}/order/${referenceId}?payment=cancelled`,
+    referenceId,
+    buyerName: buyer.name,
+    buyerEmail: buyer.email || '',
+    buyerPhone: buyer.phone,
+    expired: 24, // jam
+  };
+
+  const bodyJson = JSON.stringify(body);
+  const signature = buildIpaymuRequestSignature('POST', va, apiKey, bodyJson);
+
+  let response;
+  try {
+    response = await fetch(`${baseUrl}/payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        va,
+        signature,
+        timestamp: formatIpaymuTimestamp(),
+      },
+      body: bodyJson,
+      signal: AbortSignal.timeout(60000),
+    });
+  } catch (networkError) {
+    console.error(
+      'iPaymu fetch error:',
+      networkError.name,
+      networkError.message,
+      networkError.cause ? `| cause: ${networkError.cause.message}` : ''
+    );
+    const paymentError = new Error('Tidak dapat menghubungi iPaymu. Periksa koneksi internet server.');
+    paymentError.isPaymentError = true;
+    throw paymentError;
+  }
+
+  const result = await response.json().catch(() => null);
+  if (!result || Number(result.Status) !== 200 || !result.Data || !result.Data.Url) {
+    const paymentError = new Error(
+      result && result.Message ? result.Message : 'Gagal membuat sesi pembayaran di iPaymu'
+    );
+    paymentError.isPaymentError = true;
+    throw paymentError;
+  }
+
+  return {
+    sessionId: result.Data.SessionID || null,
+    paymentUrl: result.Data.Url,
+  };
+}
+
+// Reference ID unik pesanan, contoh: ELK-20261017-A1B2C3
+async function generateOrderReference(connection) {
+  const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    let suffix = '';
+    for (let i = 0; i < 6; i += 1) {
+      suffix += alphabet[crypto.randomInt(0, alphabet.length)];
+    }
+    const referenceId = `ELK-${datePart}-${suffix}`;
+    const [existing] = await connection.query('SELECT id FROM orders WHERE reference_id = ?', [referenceId]);
+    if (existing.length === 0) return referenceId;
+  }
+  return `ELK-${datePart}-${Date.now().toString(36).toUpperCase()}`;
+}
+
+// Kurangi stok varian sekali saja saat order menjadi paid (idempotent)
+async function applyOrderStockReduction(connection, orderId) {
+  const [orders] = await connection.query('SELECT id, stock_reduced FROM orders WHERE id = ? FOR UPDATE', [orderId]);
+  if (orders.length === 0 || orders[0].stock_reduced) return false;
+
+  const [items] = await connection.query('SELECT variant_id, quantity FROM order_items WHERE order_id = ?', [orderId]);
+  for (const item of items) {
+    if (item.variant_id) {
+      await connection.query('UPDATE product_variants SET stock = GREATEST(stock - ?, 0) WHERE id = ?', [
+        item.quantity,
+        item.variant_id,
+      ]);
+    }
+  }
+  await connection.query('UPDATE orders SET stock_reduced = 1 WHERE id = ?', [orderId]);
+  return true;
+}
+
+const ORDER_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed', 'cancelled', 'expired'];
+
+
+// --- ORDERS ROUTES ---
+
+// POST /api/orders (Public) - buat pesanan + sesi pembayaran iPaymu
+app.post('/api/orders', async (req, res) => {
+  if (!(await isIpaymuConfigured())) {
+    return res.status(503).json({
+      success: false,
+      message: 'Payment gateway belum dikonfigurasi. Lengkapi di Admin > Setting > Payment Gateway',
+    });
+  }
+
+  const { buyer_name, buyer_phone, buyer_email, address, city, notes, items } = req.body || {};
+
+  const cleanName = String(buyer_name || '').trim();
+  const cleanPhone = String(buyer_phone || '').trim();
+  const cleanEmail = String(buyer_email || '').trim();
+  const cleanAddress = String(address || '').trim();
+  const cleanCity = String(city || '').trim();
+  const cleanNotes = String(notes || '').trim();
+
+  if (!cleanName || !cleanPhone || !cleanAddress || !cleanCity) {
+    return res.status(400).json({ success: false, message: 'Nama, telepon, alamat, dan kota wajib diisi' });
+  }
+  if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    return res.status(400).json({ success: false, message: 'Format email tidak valid' });
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ success: false, message: 'Keranjang tidak boleh kosong' });
+  }
+
+  const normalizedItems = [];
+  for (const item of items) {
+    const variantId = parseInt(item.variant_id, 10);
+    const quantity = parseInt(item.quantity, 10);
+    if (!variantId || !quantity || quantity < 1 || quantity > 99) {
+      return res.status(400).json({ success: false, message: 'Data item pesanan tidak valid' });
+    }
+    normalizedItems.push({ variantId, quantity });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const variantIds = normalizedItems.map((i) => i.variantId);
+    const [variants] = await connection.query(
+      `SELECT v.*, p.name AS product_name, p.base_price, p.status AS product_status, p.is_preorder
+       FROM product_variants v
+       JOIN products p ON v.product_id = p.id
+       WHERE v.id IN (?)
+       FOR UPDATE`,
+      [variantIds]
+    );
+
+    const orderItems = [];
+    let subtotal = 0;
+
+    for (const item of normalizedItems) {
+      const variant = variants.find((v) => v.id === item.variantId);
+      if (!variant) {
+        throw new Error(`Varian dengan ID ${item.variantId} tidak ditemukan`);
+      }
+      if (variant.product_status !== 'active') {
+        throw new Error(`Produk "${variant.product_name}" sedang tidak tersedia`);
+      }
+      if (!variant.is_preorder && variant.stock < item.quantity) {
+        throw new Error(
+          `Stok "${variant.product_name}" (${variant.size}/${variant.color}) tidak mencukupi. Tersedia ${variant.stock} item.`
+        );
+      }
+
+      const price =
+        variant.price_override !== null && variant.price_override !== undefined
+          ? Number(variant.price_override)
+          : Number(variant.base_price);
+      const lineSubtotal = price * item.quantity;
+      subtotal += lineSubtotal;
+
+      orderItems.push({
+        product_id: variant.product_id,
+        variant_id: variant.id,
+        product_name: variant.product_name,
+        variant_size: variant.size,
+        variant_color: variant.color,
+        sku: variant.sku,
+        price,
+        quantity: item.quantity,
+        subtotal: lineSubtotal,
+      });
+    }
+
+    const referenceId = await generateOrderReference(connection);
+
+    const [orderResult] = await connection.query(
+      `INSERT INTO orders
+        (reference_id, buyer_name, buyer_phone, buyer_email, address, city, notes, subtotal, total, status, payment_provider)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'ipaymu')`,
+      [referenceId, cleanName, cleanPhone, cleanEmail || null, cleanAddress, cleanCity, cleanNotes || null, subtotal, subtotal]
+    );
+    const orderId = orderResult.insertId;
+
+    for (const item of orderItems) {
+      await connection.query(
+        `INSERT INTO order_items
+          (order_id, product_id, variant_id, product_name, variant_size, variant_color, sku, price, quantity, subtotal)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orderId,
+          item.product_id,
+          item.variant_id,
+          item.product_name,
+          item.variant_size,
+          item.variant_color,
+          item.sku,
+          item.price,
+          item.quantity,
+          item.subtotal,
+        ]
+      );
+    }
+
+    // Buat sesi pembayaran iPaymu; kalau gagal, seluruh transaksi di-rollback
+    const payment = await createIpaymuPaymentSession({
+      referenceId,
+      items: orderItems,
+      buyer: { name: cleanName, phone: cleanPhone, email: cleanEmail },
+      fallbackOrigin: getRequestOrigin(req),
+    });
+
+    await connection.query('UPDATE orders SET payment_session_id = ?, payment_url = ? WHERE id = ?', [
+      payment.sessionId,
+      payment.paymentUrl,
+      orderId,
+    ]);
+
+    await connection.commit();
+
+    res.status(201).json({
+      success: true,
+      message: 'Pesanan berhasil dibuat. Silakan lanjutkan pembayaran.',
+      data: {
+        id: orderId,
+        reference_id: referenceId,
+        total: subtotal,
+        payment_url: payment.paymentUrl,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Create order error:', error.message);
+    if (error.isPaymentError) {
+      return res.status(502).json({ success: false, message: `Gagal membuat sesi pembayaran: ${error.message}` });
+    }
+    res.status(400).json({ success: false, message: error.message || 'Gagal membuat pesanan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// POST /api/ipaymu/callback (Public) - webhook notifikasi pembayaran dari iPaymu
+app.post('/api/ipaymu/callback', async (req, res) => {
+  const { va } = await getIpaymuConfig();
+  const rawData = req.body || {};
+  const receivedSignature = req.headers['x-signature'];
+
+  try {
+    if (!va) {
+      console.error('iPaymu callback: Payment gateway belum dikonfigurasi di Setting admin, signature tidak dapat divalidasi');
+      return res.status(400).send('Invalid Signature');
+    }
+    if (!isValidIpaymuCallbackSignature(rawData, receivedSignature, va)) {
+      console.warn('iPaymu callback: signature tidak valid');
+      return res.status(400).send('Invalid Signature');
+    }
+
+    const referenceId = rawData.referenceId || rawData.reference_id;
+    if (!referenceId) {
+      return res.status(200).json({ status: 'OK', message: 'Callback tanpa reference_id diabaikan' });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+
+      const [orders] = await connection.query('SELECT * FROM orders WHERE reference_id = ? FOR UPDATE', [referenceId]);
+      if (orders.length === 0) {
+        await connection.rollback();
+        return res.status(200).json({ status: 'OK', message: 'Pesanan tidak ditemukan, diabaikan' });
+      }
+
+      const order = orders[0];
+      const statusCode = parseInt(rawData.status_code ?? rawData.transaction_status_code ?? 0, 10);
+      const statusText = String(rawData.status || '').toLowerCase();
+
+      if (statusCode === 1 || statusText === 'berhasil') {
+        // Idempotent: jangan proses ulang kalau sudah paid
+        if (order.status !== 'paid') {
+          await connection.query(
+            "UPDATE orders SET status = 'paid', paid_at = NOW(), ipaymu_trx_id = ?, payment_channel = ? WHERE id = ?",
+            [
+              rawData.trx_id !== undefined && rawData.trx_id !== null ? String(rawData.trx_id) : null,
+              rawData.channel !== undefined && rawData.channel !== null ? String(rawData.channel) : null,
+              order.id,
+            ]
+          );
+          await applyOrderStockReduction(connection, order.id);
+        }
+      } else if (statusCode === -2 || statusText === 'expired') {
+        if (order.status === 'pending') {
+          await connection.query("UPDATE orders SET status = 'expired' WHERE id = ?", [order.id]);
+        }
+      }
+      // status_code 0 / pending: tidak ada perubahan
+
+      await connection.commit();
+      res.status(200).json({ status: 'OK' });
+    } catch (innerError) {
+      await connection.rollback();
+      throw innerError;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('iPaymu callback error:', error);
+    res.status(500).json({ status: 'ERROR', message: 'Gagal memproses callback' });
+  }
+});
+
+// GET /api/orders/reference/:referenceId (Public) - status pesanan untuk halaman pembeli
+app.get('/api/orders/reference/:referenceId', async (req, res) => {
+  const { referenceId } = req.params;
+  try {
+    const [orders] = await pool.query(
+      `SELECT id, reference_id, buyer_name, city, subtotal, total, status, payment_url, paid_at, created_at
+       FROM orders WHERE reference_id = ?`,
+      [referenceId]
+    );
+    if (orders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+
+    const order = orders[0];
+    const [items] = await pool.query(
+      'SELECT product_name, variant_size, variant_color, sku, price, quantity, subtotal FROM order_items WHERE order_id = ?',
+      [order.id]
+    );
+
+    res.json({
+      success: true,
+      data: {
+        reference_id: order.reference_id,
+        buyer_name: order.buyer_name,
+        city: order.city,
+        subtotal: order.subtotal,
+        total: order.total,
+        status: order.status,
+        paid_at: order.paid_at,
+        created_at: order.created_at,
+        // Link pembayaran hanya relevan selama pesanan belum dibayar
+        payment_url: order.status === 'pending' ? order.payment_url : null,
+        items,
+      },
+    });
+  } catch (error) {
+    console.error('Get order by reference error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil data pesanan' });
+  }
+});
+
+// GET /api/orders (Admin) - daftar pesanan + pagination, search, filter, sort
+app.get('/api/orders', verifyToken, async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+    const search = String(req.query.search || '').trim();
+    const status = String(req.query.status || '').trim();
+    const sort = req.query.sort || 'newest';
+
+    const whereClauses = [];
+    const queryParams = [];
+    const countParams = [];
+
+    if (search) {
+      whereClauses.push('(o.reference_id LIKE ? OR o.buyer_name LIKE ? OR o.buyer_phone LIKE ?)');
+      const wild = `%${search}%`;
+      queryParams.push(wild, wild, wild);
+      countParams.push(wild, wild, wild);
+    }
+    if (status) {
+      whereClauses.push('o.status = ?');
+      queryParams.push(status);
+      countParams.push(status);
+    }
+
+    const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const [[{ total }]] = await pool.query(`SELECT COUNT(*) as total FROM orders o ${whereSql}`, countParams);
+    const totalPages = Math.ceil(total / limit);
+
+    let orderSql = 'ORDER BY o.id DESC';
+    if (sort === 'oldest') orderSql = 'ORDER BY o.id ASC';
+    else if (sort === 'total_desc') orderSql = 'ORDER BY o.total DESC';
+    else if (sort === 'total_asc') orderSql = 'ORDER BY o.total ASC';
+
+    queryParams.push(limit, offset);
+
+    const [orders] = await pool.query(
+      `SELECT o.id, o.reference_id, o.buyer_name, o.buyer_phone, o.buyer_email, o.city, o.subtotal, o.total,
+              o.status, o.payment_channel, o.paid_at, o.created_at,
+              (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
+       FROM orders o
+       ${whereSql}
+       ${orderSql}
+       LIMIT ? OFFSET ?`,
+      queryParams
+    );
+
+    res.json({
+      success: true,
+      data: orders,
+      pagination: { page, limit, total, totalPages },
+    });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil daftar pesanan' });
+  }
+});
+
+// GET /api/orders/:id (Admin) - detail pesanan + item
+app.get('/api/orders/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [orders] = await pool.query('SELECT * FROM orders WHERE id = ?', [id]);
+    if (orders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+    const [items] = await pool.query('SELECT * FROM order_items WHERE order_id = ?', [id]);
+    res.json({ success: true, data: { ...orders[0], items } });
+  } catch (error) {
+    console.error('Get order detail error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil detail pesanan' });
+  }
+});
+
+// PUT /api/orders/:id/status (Admin) - update status pesanan
+app.put('/api/orders/:id/status', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body || {};
+
+  if (!ORDER_STATUSES.includes(status)) {
+    return res.status(400).json({ success: false, message: `Status tidak valid. Pilihan: ${ORDER_STATUSES.join(', ')}` });
+  }
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [orders] = await connection.query('SELECT * FROM orders WHERE id = ? FOR UPDATE', [id]);
+    if (orders.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+    const order = orders[0];
+
+    if (status === 'paid') {
+      await connection.query("UPDATE orders SET status = 'paid', paid_at = COALESCE(paid_at, NOW()) WHERE id = ?", [order.id]);
+      await applyOrderStockReduction(connection, order.id);
+    } else {
+      await connection.query('UPDATE orders SET status = ? WHERE id = ?', [status, order.id]);
+    }
+
+    await connection.commit();
+    res.json({ success: true, message: 'Status pesanan berhasil diperbarui' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Update order status error:', error);
+    res.status(500).json({ success: false, message: 'Gagal memperbarui status pesanan' });
+  } finally {
+    connection.release();
+  }
+});
+
 
 // Start server
 app.listen(PORT, () => {

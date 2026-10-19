@@ -4,12 +4,11 @@ import { API_ENDPOINTS } from "../../utils/endpoints";
 import {
   Loader2,
   Save,
-  CreditCard,
+  Building2,
+  User,
+  KeyRound,
   Eye,
   EyeOff,
-  ShieldCheck,
-  ShieldAlert,
-  Building2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -35,14 +34,16 @@ export default function AdminSettings({ onActionSuccess }) {
   const [businessAdminPhone, setBusinessAdminPhone] = useState("");
   const [businessSaving, setBusinessSaving] = useState(false);
 
-  // --- Payment gateway (iPaymu) ---
-  const [paymentEnv, setPaymentEnv] = useState("sandbox");
-  const [paymentVa, setPaymentVa] = useState("");
-  const [paymentApiKey, setPaymentApiKey] = useState("");
-  const [paymentNotifyUrl, setPaymentNotifyUrl] = useState("");
-  const [siteUrl, setSiteUrl] = useState("");
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [paymentSaving, setPaymentSaving] = useState(false);
+  // --- Akun admin ---
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [pwCurrent, setPwCurrent] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwConfirm, setPwConfirm] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [showPwCurrent, setShowPwCurrent] = useState(false);
+  const [showPwNew, setShowPwNew] = useState(false);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -57,11 +58,6 @@ export default function AdminSettings({ onActionSuccess }) {
         setBusinessAddress(res.data.business_address || "");
         setBusinessEmail(res.data.business_email || "");
         setBusinessAdminPhone(res.data.business_phone_admin || "");
-        setPaymentEnv((res.data.ipaymu_env || "sandbox").toLowerCase());
-        setPaymentVa(res.data.ipaymu_va || "");
-        setPaymentApiKey(res.data.ipaymu_api_key || "");
-        setPaymentNotifyUrl(res.data.ipaymu_notify_url || "");
-        setSiteUrl(res.data.site_url || window.location.origin);
       }
     } catch (error) {
       console.error("Gagal memuat pengaturan:", error);
@@ -73,7 +69,20 @@ export default function AdminSettings({ onActionSuccess }) {
 
   useEffect(() => {
     fetchSettings();
+    fetchProfile();
   }, []);
+
+  const fetchProfile = async () => {
+    try {
+      const res = await request.get(API_ENDPOINTS.AUTH.PROFILE);
+      if (res.success && res.user) {
+        setProfileName(res.user.name || "");
+        setProfileEmail(res.user.email || "");
+      }
+    } catch (error) {
+      console.error("Gagal memuat profil admin:", error);
+    }
+  };
 
   const handleSettingsSubmit = async (e) => {
     e.preventDefault();
@@ -154,58 +163,81 @@ export default function AdminSettings({ onActionSuccess }) {
     }
   };
 
-  const handlePaymentSubmit = async (e) => {
+  const handleProfileSubmit = async (e) => {
     e.preventDefault();
 
-    const cleanVa = paymentVa.trim();
-    const cleanKey = paymentApiKey.trim();
-    const cleanSiteUrl = siteUrl.trim().replace(/\/+$/, "");
-    const cleanNotifyUrl = paymentNotifyUrl.trim();
-
-    if ((cleanVa && !cleanKey) || (!cleanVa && cleanKey)) {
-      toast.error("Isi Nomor VA dan API Key sekaligus (kosongkan keduanya untuk menonaktifkan).");
+    const cleanName = profileName.trim();
+    const cleanEmail = profileEmail.trim();
+    if (!cleanName) {
+      toast.error("Nama wajib diisi.");
       return;
     }
-    if (cleanVa && !/^[0-9]+$/.test(cleanVa)) {
-      toast.error("Nomor VA iPaymu hanya boleh berisi angka.");
-      return;
-    }
-    if (cleanSiteUrl && !/^https?:\/\//i.test(cleanSiteUrl)) {
-      toast.error("URL Website Toko harus diawali http:// atau https://");
-      return;
-    }
-    if (cleanNotifyUrl && !/^https?:\/\//i.test(cleanNotifyUrl)) {
-      toast.error("URL Callback harus diawali http:// atau https://");
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      toast.error("Masukkan alamat email yang valid.");
       return;
     }
 
-    setPaymentSaving(true);
-    const toastId = toast.loading("Menyimpan pengaturan payment gateway...");
+    setProfileSaving(true);
+    const toastId = toast.loading("Menyimpan profil admin...");
     try {
-      const res = await request.put(API_ENDPOINTS.SETTINGS.UPDATE, {
-        ipaymu_env: paymentEnv,
-        ipaymu_va: cleanVa,
-        ipaymu_api_key: cleanKey,
-        ipaymu_notify_url: cleanNotifyUrl,
-        site_url: cleanSiteUrl,
+      const res = await request.put(API_ENDPOINTS.AUTH.UPDATE_PROFILE, {
+        name: cleanName,
+        email: cleanEmail,
       });
       if (res.success) {
-        toast.success("Pengaturan payment gateway berhasil disimpan.", { id: toastId });
-        fetchSettings();
+        toast.success("Profil admin berhasil diperbarui. Login berikutnya memakai email baru.", { id: toastId });
+        fetchProfile();
         if (onActionSuccess) onActionSuccess();
       }
     } catch (error) {
       console.error(error);
-      toast.error("Gagal menyimpan pengaturan payment gateway.", { id: toastId });
+      toast.error("Gagal menyimpan profil admin.", { id: toastId });
     } finally {
-      setPaymentSaving(false);
+      setProfileSaving(false);
     }
   };
 
-  const isPaymentConfigured = Boolean(paymentVa.trim() && paymentApiKey.trim());
-  const callbackPreview = `${
-    siteUrl.trim().replace(/\/+$/, "") || window.location.origin
-  }/api/ipaymu/callback`;
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!pwCurrent || !pwNew || !pwConfirm) {
+      toast.error("Isi password lama, password baru, dan konfirmasinya.");
+      return;
+    }
+    if (pwNew.length < 8) {
+      toast.error("Password baru minimal 8 karakter.");
+      return;
+    }
+    if (pwNew !== pwConfirm) {
+      toast.error("Konfirmasi password baru tidak sama.");
+      return;
+    }
+
+    setPwSaving(true);
+    const toastId = toast.loading("Mengubah password...");
+    try {
+      const res = await request.put(API_ENDPOINTS.AUTH.CHANGE_PASSWORD, {
+        current_password: pwCurrent,
+        new_password: pwNew,
+      });
+      if (res.success) {
+        toast.success("Password berhasil diubah. Silakan login ulang.", { id: toastId });
+        setPwCurrent("");
+        setPwNew("");
+        setPwConfirm("");
+        // Paksa login ulang agar sesi memakai kredensial baru
+        setTimeout(() => {
+          localStorage.removeItem("elkon_token");
+          window.location.href = "/login";
+        }, 1200);
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal mengubah password.", { id: toastId });
+    } finally {
+      setPwSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -374,15 +406,15 @@ export default function AdminSettings({ onActionSuccess }) {
         )}
       </div>
 
-      {/* ================= Payment Gateway ================= */}
+      {/* ================= Akun Admin ================= */}
       <div className="bg-white border border-stone-150 p-8 shadow-xs space-y-6">
         <div className="space-y-1">
           <h3 className="font-serif text-lg font-light text-stone-900 uppercase tracking-widest flex items-center gap-2">
-            <CreditCard className="h-5 w-5 text-stone-400" />
-            Payment Gateway
+            <User className="h-5 w-5 text-stone-400" />
+            Akun Admin
           </h3>
           <p className="text-xs text-stone-400">
-            Hubungkan toko dengan iPaymu untuk menerima pembayaran (VA bank, QRIS, e-wallet). Pengaturan tersimpan di database dan langsung aktif tanpa restart server.
+            Ubah nama, email login, dan password admin. Setelah ganti password Anda akan diminta login ulang.
           </p>
         </div>
 
@@ -391,143 +423,137 @@ export default function AdminSettings({ onActionSuccess }) {
             <Loader2 className="h-6 w-6 animate-spin text-stone-500" />
           </div>
         ) : (
-          <form onSubmit={handlePaymentSubmit} className="space-y-6">
-            {/* Status koneksi */}
-            <div
-              className={`flex items-center gap-3 border px-4 py-3 ${
-                isPaymentConfigured
-                  ? "border-emerald-200 bg-emerald-50/60"
-                  : "border-amber-200 bg-amber-50/60"
-              }`}
-            >
-              {isPaymentConfigured ? (
-                <ShieldCheck className="h-5 w-5 text-emerald-600 shrink-0" />
-              ) : (
-                <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0" />
-              )}
-              <div className="text-xs leading-relaxed">
-                {isPaymentConfigured ? (
-                  <p className="text-emerald-800">
-                    Aktif — mode{" "}
-                    <span className="font-semibold">
-                      {paymentEnv === "production" ? "Production (live)" : "Sandbox (testing)"}
-                    </span>
-                    .
-                  </p>
-                ) : (
-                  <p className="text-amber-800">
-                    Belum dikonfigurasi — tombol checkout akan menampilkan pesan &quot;Payment gateway belum dikonfigurasi&quot;.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">Mode iPaymu</label>
-              <select
-                value={paymentEnv}
-                onChange={(e) => setPaymentEnv(e.target.value)}
-                className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all"
-              >
-                <option value="sandbox">Sandbox (testing)</option>
-                <option value="production">Production (live)</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">Nomor VA iPaymu</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                placeholder="cth. 1179001234567890"
-                value={paymentVa}
-                onChange={(e) => setPaymentVa(e.target.value.replace(/[^0-9]/g, ""))}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">API Key iPaymu</label>
-              <div className="relative">
+          <>
+            <form onSubmit={handleProfileSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                  Nama Admin
+                </label>
                 <input
-                  type={showApiKey ? "text" : "password"}
-                  autoComplete="new-password"
-                  className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 pr-11 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                  placeholder="API Key dari dashboard iPaymu"
-                  value={paymentApiKey}
-                  onChange={(e) => setPaymentApiKey(e.target.value)}
+                  type="text"
+                  required
+                  className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                  placeholder="Nama admin"
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-stone-400 hover:text-stone-700"
-                  title={showApiKey ? "Sembunyikan API Key" : "Tampilkan API Key"}
-                >
-                  {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
               </div>
-            </div>
+
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                  Email Login
+                </label>
+                <input
+                  type="email"
+                  required
+                  className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                  placeholder="admin@tokosaya.com"
+                  value={profileEmail}
+                  onChange={(e) => setProfileEmail(e.target.value)}
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={profileSaving}
+                className="w-full flex items-center justify-center space-x-2 bg-stone-900 px-6 py-4 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black disabled:opacity-50 transition-all duration-200"
+              >
+                {profileSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                <span>{profileSaving ? "Menyimpan..." : "Simpan Profil"}</span>
+              </button>
+            </form>
 
             <div className="h-[1px] w-full bg-stone-100" />
 
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">URL Website Toko</label>
-              <input
-                type="url"
-                className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                placeholder="cth. https://tokosaya.com"
-                value={siteUrl}
-                onChange={(e) => setSiteUrl(e.target.value)}
-              />
-              <p className="text-[10px] text-stone-450 leading-relaxed">
-                Dipakai untuk mengembalikan pembeli ke halaman status pesanan setelah pembayaran.
-              </p>
-            </div>
+            <form onSubmit={handlePasswordSubmit} className="space-y-6">
+              <div className="space-y-1">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-stone-500 flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-stone-400" />
+                  Ganti Password
+                </h4>
+              </div>
 
-            <div className="space-y-2">
-              <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">URL Callback (opsional)</label>
-              <input
-                type="url"
-                className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
-                placeholder={callbackPreview}
-                value={paymentNotifyUrl}
-                onChange={(e) => setPaymentNotifyUrl(e.target.value)}
-              />
-              <p className="text-[10px] text-stone-450 leading-relaxed">
-                Kosongkan untuk memakai otomatis: <span className="font-mono font-medium text-stone-700 break-all">{callbackPreview}</span> — daftarkan URL ini di dashboard iPaymu agar status pembayaran ter-update otomatis. Untuk testing di komputer lokal, isi dengan URL tunnel (mis. ngrok).
-              </p>
-            </div>
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                  Password Lama
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPwCurrent ? "text" : "password"}
+                    autoComplete="current-password"
+                    className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 pr-11 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                    placeholder="Password saat ini"
+                    value={pwCurrent}
+                    onChange={(e) => setPwCurrent(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwCurrent((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-stone-400 hover:text-stone-700"
+                  >
+                    {showPwCurrent ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
 
-            <div className="bg-stone-50 border border-stone-150 p-4 text-[11px] text-stone-500 leading-relaxed space-y-1">
-              <p className="font-semibold text-stone-700">Cara mendapatkan kredensial:</p>
-              <p>
-                1. Login ke dashboard iPaymu → menu <span className="font-medium">Integrasi</span>:{" "}
-                <span className="font-mono break-all">https://sandbox.ipaymu.com/integration</span> (sandbox) atau{" "}
-                <span className="font-mono break-all">https://my.ipaymu.com/integration</span> (production).
-              </p>
-              <p>
-                2. Salin <span className="font-medium">Nomor VA</span> dan <span className="font-medium">API Key</span> ke kolom di atas, lalu simpan.
-              </p>
-              <p>3. Daftarkan URL Callback di dashboard iPaymu agar status pembayaran ter-update otomatis.</p>
-            </div>
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                  Password Baru (min. 8 karakter)
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPwNew ? "text" : "password"}
+                    autoComplete="new-password"
+                    className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 pr-11 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                    placeholder="Password baru"
+                    value={pwNew}
+                    onChange={(e) => setPwNew(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPwNew((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-stone-400 hover:text-stone-700"
+                  >
+                    {showPwNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
 
-            <div className="h-[1px] w-full bg-stone-100" />
+              <div className="space-y-2">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                  Konfirmasi Password Baru
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="w-full bg-stone-50/50 border border-stone-250 px-3 py-3 text-sm text-stone-955 focus:border-stone-900 focus:outline-none transition-all placeholder-stone-400"
+                  placeholder="Ulangi password baru"
+                  value={pwConfirm}
+                  onChange={(e) => setPwConfirm(e.target.value)}
+                />
+              </div>
 
-            <button
-              type="submit"
-              disabled={paymentSaving}
-              className="w-full flex items-center justify-center space-x-2 bg-stone-900 px-6 py-4 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black disabled:opacity-50 transition-all duration-200"
-            >
-              {paymentSaving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              <span>{paymentSaving ? "Menyimpan..." : "Simpan Payment Gateway"}</span>
-            </button>
-          </form>
+              <button
+                type="submit"
+                disabled={pwSaving}
+                className="w-full flex items-center justify-center space-x-2 bg-stone-900 px-6 py-4 text-xs font-semibold uppercase tracking-widest text-white hover:bg-stone-850 active:bg-black disabled:opacity-50 transition-all duration-200"
+              >
+                {pwSaving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <KeyRound className="h-4 w-4" />
+                )}
+                <span>{pwSaving ? "Menyimpan..." : "Ganti Password"}</span>
+              </button>
+            </form>
+          </>
         )}
       </div>
+
     </div>
   );
 }
