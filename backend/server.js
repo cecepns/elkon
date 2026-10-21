@@ -5,7 +5,16 @@ const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
+let nodeCrypto = null;
+try {
+  nodeCrypto = require('node:crypto');
+} catch (e) {
+  try {
+    nodeCrypto = require('crypto');
+  } catch (e2) {
+    nodeCrypto = null;
+  }
+}
 require('dotenv').config();
 
 const app = express();
@@ -959,13 +968,72 @@ function formatIpaymuTimestamp(date = new Date()) {
   );
 }
 
+// Helper kriptografi universal: kompatibel dengan Node.js crypto maupun Web Crypto API (globalThis.crypto)
+async function computeSha256Hex(str) {
+  if (nodeCrypto && typeof nodeCrypto.createHash === 'function') {
+    return nodeCrypto.createHash('sha256').update(str).digest('hex');
+  }
+  if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto?.subtle) {
+    const enc = new TextEncoder();
+    const buf = await globalThis.crypto.subtle.digest('SHA-256', enc.encode(str));
+    return Buffer.from(buf).toString('hex');
+  }
+  throw new Error('Modul crypto untuk SHA-256 tidak tersedia di environment server');
+}
+
+async function computeHmacSha256Hex(secret, str) {
+  if (nodeCrypto && typeof nodeCrypto.createHmac === 'function') {
+    return nodeCrypto.createHmac('sha256', secret).update(str).digest('hex');
+  }
+  if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto?.subtle) {
+    const enc = new TextEncoder();
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      enc.encode(String(secret)),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const sig = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(str));
+    return Buffer.from(sig).toString('hex');
+  }
+  throw new Error('Modul crypto untuk HMAC-SHA256 tidak tersedia di environment server');
+}
+
+function timingSafeCompare(a, b) {
+  const bufA = Buffer.from(String(a), 'utf8');
+  const bufB = Buffer.from(String(b), 'utf8');
+  if (bufA.length !== bufB.length) return false;
+  if (nodeCrypto && typeof nodeCrypto.timingSafeEqual === 'function') {
+    return nodeCrypto.timingSafeEqual(bufA, bufB);
+  }
+  let result = 0;
+  for (let i = 0; i < bufA.length; i += 1) {
+    result |= bufA[i] ^ bufB[i];
+  }
+  return result === 0;
+}
+
+function getRandomIntSafe(min, max) {
+  if (nodeCrypto && typeof nodeCrypto.randomInt === 'function') {
+    return nodeCrypto.randomInt(min, max);
+  }
+  const range = max - min;
+  if (typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto?.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    globalThis.crypto.getRandomValues(arr);
+    return min + (arr[0] % range);
+  }
+  return min + Math.floor(Math.random() * range);
+}
+
 // Signature request iPaymu v2:
 //   String to Sign = Method + ":" + VA + ":" + SHA256(bodyJson) + ":" + ApiKey
 //   Signature      = HMAC-SHA256(String to Sign, ApiKey)
-function buildIpaymuRequestSignature(method, va, apiKey, bodyJson) {
-  const bodyHash = crypto.createHash('sha256').update(bodyJson).digest('hex');
+async function buildIpaymuRequestSignature(method, va, apiKey, bodyJson) {
+  const bodyHash = await computeSha256Hex(bodyJson);
   const stringToSign = `${method}:${va}:${bodyHash}:${apiKey}`;
-  return crypto.createHmac('sha256', apiKey).update(stringToSign).digest('hex');
+  return await computeHmacSha256Hex(apiKey, stringToSign);
 }
 
 // Normalisasi payload callback sesuai dokumentasi resmi iPaymu sebelum validasi signature
@@ -1002,16 +1070,13 @@ function sortObjectKeysAlphabetically(obj) {
 }
 
 // Validasi header X-Signature callback: HMAC-SHA256(json ternormalisasi, secret = Nomor VA)
-function isValidIpaymuCallbackSignature(rawData, receivedSignature, va) {
+async function isValidIpaymuCallbackSignature(rawData, receivedSignature, va) {
   if (!receivedSignature) return false;
   const sorted = sortObjectKeysAlphabetically(normalizeIpaymuCallbackData(rawData));
   let jsonBody = JSON.stringify(sorted);
   jsonBody = jsonBody.replace(/\//g, '\\/');
-  const expected = crypto.createHmac('sha256', va).update(jsonBody).digest('hex');
-  const expectedBuf = Buffer.from(expected, 'utf8');
-  const receivedBuf = Buffer.from(String(receivedSignature), 'utf8');
-  if (expectedBuf.length !== receivedBuf.length) return false;
-  return crypto.timingSafeEqual(expectedBuf, receivedBuf);
+  const expected = await computeHmacSha256Hex(va, jsonBody);
+  return timingSafeCompare(expected, receivedSignature);
 }
 
 // Buat sesi pembayaran Redirect di iPaymu -> { sessionId, paymentUrl }
@@ -1042,7 +1107,7 @@ async function createIpaymuPaymentSession({ referenceId, items, buyer, fallbackO
   };
 
   const bodyJson = JSON.stringify(body);
-  const signature = buildIpaymuRequestSignature('POST', va, apiKey, bodyJson);
+  const signature = await buildIpaymuRequestSignature('POST', va, apiKey, bodyJson);
 
   let response;
   try {
@@ -1091,7 +1156,7 @@ async function generateOrderReference(connection) {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     let suffix = '';
     for (let i = 0; i < 6; i += 1) {
-      suffix += alphabet[crypto.randomInt(0, alphabet.length)];
+      suffix += alphabet[getRandomIntSafe(0, alphabet.length)];
     }
     const referenceId = `ELK-${datePart}-${suffix}`;
     const [existing] = await connection.query('SELECT id FROM orders WHERE reference_id = ?', [referenceId]);
@@ -1141,10 +1206,10 @@ app.post('/api/orders', async (req, res) => {
   const cleanCity = String(city || '').trim();
   const cleanNotes = String(notes || '').trim();
 
-  if (!cleanName || !cleanPhone || !cleanAddress || !cleanCity) {
-    return res.status(400).json({ success: false, message: 'Nama, telepon, alamat, dan kota wajib diisi' });
+  if (!cleanName || !cleanPhone || !cleanEmail || !cleanAddress || !cleanCity) {
+    return res.status(400).json({ success: false, message: 'Nama, telepon, email, alamat, dan kota wajib diisi' });
   }
-  if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
     return res.status(400).json({ success: false, message: 'Format email tidak valid' });
   }
   if (!Array.isArray(items) || items.length === 0) {
@@ -1291,7 +1356,7 @@ app.post('/api/ipaymu/callback', async (req, res) => {
       console.error('iPaymu callback: Payment gateway belum dikonfigurasi di Setting admin, signature tidak dapat divalidasi');
       return res.status(400).send('Invalid Signature');
     }
-    if (!isValidIpaymuCallbackSignature(rawData, receivedSignature, va)) {
+    if (!(await isValidIpaymuCallbackSignature(rawData, receivedSignature, va))) {
       console.warn('iPaymu callback: signature tidak valid');
       return res.status(400).send('Invalid Signature');
     }
