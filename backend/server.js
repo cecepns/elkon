@@ -3,17 +3,13 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+const app = express.Router();
 
-// Middleware
-app.use(cors());
+
 app.use(
   express.json({
     verify: (req, res, buf) => {
@@ -21,7 +17,84 @@ app.use(
     },
   })
 );
-// iPaymu mengirim callback dalam format x-www-form-urlencoded (default) atau JSON
+
+const LOG_BUFFER_MAX = 100;
+const LOG_LINE_MAX = 2000;
+const LOG_FILE_MAX_BYTES = 1024 * 1024;
+const LOG_DIR = path.join(__dirname, 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'server.log');
+const logBuffer = [];
+
+function stringifyLogArg(value) {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.stack || value.message;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function appendLogFile(line) {
+  try {
+    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    try {
+      if (fs.statSync(LOG_FILE).size > LOG_FILE_MAX_BYTES) {
+        fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
+      }
+    } catch {
+      // file belum ada -> langsung append di bawah
+    }
+    fs.appendFileSync(LOG_FILE, `${line}\n`);
+  } catch {
+    // File log bersifat opsional (mis. disk read-only) — jangan sampai melempar error
+  }
+}
+
+function recordLog(level, args) {
+  try {
+    const message = args.map(stringifyLogArg).join(' ').slice(0, LOG_LINE_MAX);
+    const entry = { time: new Date().toISOString(), level, message };
+    logBuffer.push(entry);
+    if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
+    appendLogFile(`[${entry.time}] [${level.toUpperCase()}] ${message}`);
+  } catch {
+    // logging tidak boleh pernah menyebabkan error aplikasi
+  }
+}
+
+// Muat riwayat log terakhir dari file saat server dinyalakan,
+// supaya isi tab "Log" tidak hilang setiap restart aplikasi.
+function loadRecentLogsFromFile(maxEntries = 100) {
+  try {
+    if (!fs.existsSync(LOG_FILE)) return;
+    const lines = fs.readFileSync(LOG_FILE, 'utf8').split(/\r?\n/).filter(Boolean).slice(-maxEntries);
+    for (const line of lines) {
+      const match = line.match(/^\[([^\]]+)\] \[([A-Z]+)\] ([\s\S]*)$/);
+      if (!match) continue;
+      const level = match[2].toLowerCase();
+      logBuffer.push({
+        time: match[1],
+        level: ['info', 'warn', 'error'].includes(level) ? level : 'info',
+        message: match[3].slice(0, LOG_LINE_MAX),
+      });
+    }
+  } catch {
+    // Riwayat log bersifat opsional — jangan sampai menghambat server start
+  }
+}
+loadRecentLogsFromFile();
+
+// Tee console.log/warn/error ke buffer — output terminal tetap seperti biasa
+['log', 'warn', 'error'].forEach((method) => {
+  const original = console[method].bind(console);
+  console[method] = (...args) => {
+    recordLog(method === 'log' ? 'info' : method, args);
+    original(...args);
+  };
+});
+
+
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads-elkon', express.static(path.join(__dirname, 'uploads-elkon')));
 
@@ -30,10 +103,10 @@ let pool;
 async function connectDb() {
   try {
     pool = mysql.createPool({
-      host: process.env.DB_HOST || '127.0.0.1',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || '',
-      database: process.env.DB_NAME || 'elkon_db',
+      host: "localhost",
+      user: "kinq6231_elkon",
+      password: "kinq6231_elkon",
+      database: "kinq6231_elkon",
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
@@ -1687,7 +1760,5 @@ app.use((err, req, res, next) => {
 });
 
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`elkon backend server is running on port ${PORT}`);
-});
+
+module.exports = app;
