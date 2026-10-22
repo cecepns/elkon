@@ -3,18 +3,10 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-let nodeCrypto = null;
-try {
-  nodeCrypto = require('node:crypto');
-} catch (e) {
-  try {
-    nodeCrypto = require('crypto');
-  } catch (e2) {
-    nodeCrypto = null;
-  }
-}
 require('dotenv').config();
 
 const app = express();
@@ -22,7 +14,13 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 // iPaymu mengirim callback dalam format x-www-form-urlencoded (default) atau JSON
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads-elkon', express.static(path.join(__dirname, 'uploads-elkon')));
@@ -1205,9 +1203,8 @@ async function createTripayPaymentSession({ referenceId, items, buyer, fallbackO
 // Reference ID unik pesanan, contoh: ELK-20261017-A1B2C3
 function secureRandomIndex(max) {
   try {
-    const nc = require('crypto');
-    if (nc && typeof nc.randomInt === 'function') return nc.randomInt(0, max);
-    if (nc && typeof nc.randomBytes === 'function') return nc.randomBytes(4).readUInt32BE(0) % max;
+    if (crypto && typeof crypto.randomInt === 'function') return crypto.randomInt(0, max);
+    if (crypto && typeof crypto.randomBytes === 'function') return crypto.randomBytes(4).readUInt32BE(0) % max;
   } catch (_) { /* abaikan, lanjut ke fallback */ }
   const g = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
   if (g && typeof g.getRandomValues === 'function') {
