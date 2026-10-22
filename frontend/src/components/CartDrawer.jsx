@@ -71,7 +71,7 @@ export default function CartDrawer({ isOpen, onClose, cartItems, onUpdateQuantit
         return;
       }
 
-      toast.error(res?.message || "Gagal membuat pesanan. Silakan coba lagi.", { id: toastId });
+      toast.error("Gagal membuat pesanan. Silakan coba lagi.", { id: toastId });
     } catch (error) {
       // Pesan error spesifik sudah ditampilkan oleh request helper (toast)
       toast.dismiss(toastId);

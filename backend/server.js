@@ -64,6 +64,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024, files: 10 }, // maksimal 5MB per file
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|webp|gif/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -75,6 +76,63 @@ const upload = multer({
     }
   },
 });
+
+// Verifikasi magic bytes gambar (ekstensi bisa dipalsukan) — hapus file yang tidak valid
+function verifyUploadedImage(file) {
+  const ext = path.extname(file.filename).toLowerCase();
+  let header;
+  try {
+    const fd = fs.openSync(file.path, 'r');
+    header = Buffer.alloc(12);
+    fs.readSync(fd, header, 0, 12, 0);
+    fs.closeSync(fd);
+  } catch (_) {
+    return false;
+  }
+  let ok = false;
+  if (ext === '.jpg' || ext === '.jpeg') {
+    ok = header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  } else if (ext === '.png') {
+    ok = header.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  } else if (ext === '.gif') {
+    const sig = header.slice(0, 6).toString('ascii');
+    ok = sig === 'GIF87a' || sig === 'GIF89a';
+  } else if (ext === '.webp') {
+    ok = header.slice(0, 4).toString('ascii') === 'RIFF' && header.slice(8, 12).toString('ascii') === 'WEBP';
+  }
+  if (!ok) {
+    try { fs.unlinkSync(file.path); } catch (_) { /* abaikan */ }
+  }
+  return ok;
+}
+
+// Rate limiter sederhana tanpa dependensi (sliding window per IP+path)
+const rateBuckets = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, stamps] of rateBuckets) {
+    const fresh = stamps.filter((t) => now - t < 15 * 60 * 1000);
+    if (fresh.length === 0) rateBuckets.delete(key);
+    else rateBuckets.set(key, fresh);
+  }
+}, 10 * 60 * 1000).unref();
+function rateLimit({ windowMs, max, message }) {
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = `${req.ip}:${req.path}`;
+    const stamps = (rateBuckets.get(key) || []).filter((t) => now - t < windowMs);
+    if (stamps.length >= max) {
+      return res.status(429).json({ success: false, message: message || 'Terlalu banyak permintaan. Coba lagi nanti.' });
+    }
+    stamps.push(now);
+    rateBuckets.set(key, stamps);
+    next();
+  };
+}
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: 'Terlalu banyak percobaan login. Coba lagi 15 menit lagi.' });
+const orderLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 60 });
+const callbackLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300 });
+const contactLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 30 });
 
 // Auth Middleware
 const verifyToken = (req, res, next) => {
@@ -95,40 +153,14 @@ const verifyToken = (req, res, next) => {
 
 // --- AUTH ROUTES ---
 
-// POST /api/auth/register
+// POST /api/auth/register - DINONAKTIFKAN: admin dibuat via seed database.
+// Dibiarkan sebagai endpoint tertutup agar tidak ada yang bisa mendaftar sebagai admin.
 app.post('/api/auth/register', async (req, res) => {
-  const { name, email, password } = req.body;
-  if (!name || !email || !password) {
-    return res.status(400).json({ success: false, message: 'Nama, email, dan password wajib diisi' });
-  }
-
-  try {
-    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [email]);
-    if (existing.length > 0) {
-      return res.status(400).json({ success: false, message: 'Email sudah terdaftar' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    const [result] = await pool.query(
-      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
-      [name, email, hashedPassword, 'admin']
-    );
-
-    res.status(201).json({
-      success: true,
-      message: 'Admin berhasil didaftarkan',
-      data: { id: result.insertId, name, email },
-    });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ success: false, message: 'Terjadi kesalahan sistem' });
-  }
+  return res.status(403).json({ success: false, message: 'Pendaftaran akun baru dinonaktifkan' });
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ success: false, message: 'Email dan password wajib diisi' });
@@ -178,11 +210,80 @@ app.get('/api/auth/profile', verifyToken, async (req, res) => {
   }
 });
 
+// PUT /api/auth/profile (Admin) - ubah nama & email admin
+app.put('/api/auth/profile', verifyToken, async (req, res) => {
+  const { name, email } = req.body || {};
+  const cleanName = String(name || '').trim();
+  const cleanEmail = String(email || '').trim().toLowerCase();
+
+  if (!cleanName) {
+    return res.status(400).json({ success: false, message: 'Nama wajib diisi' });
+  }
+  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+    return res.status(400).json({ success: false, message: 'Format email tidak valid' });
+  }
+
+  try {
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ? AND id <> ?', [cleanEmail, req.user.id]);
+    if (existing.length > 0) {
+      return res.status(400).json({ success: false, message: 'Email sudah dipakai akun lain' });
+    }
+    await pool.query('UPDATE users SET name = ?, email = ? WHERE id = ?', [cleanName, cleanEmail, req.user.id]);
+    res.json({
+      success: true,
+      message: 'Profil admin berhasil diperbarui. Login berikutnya memakai email baru.',
+      user: { id: req.user.id, name: cleanName, email: cleanEmail },
+    });
+  } catch (error) {
+    console.error('Profile update error:', error);
+    res.status(500).json({ success: false, message: 'Gagal memperbarui profil' });
+  }
+});
+
+// PUT /api/auth/password (Admin) - ganti password (wajib tahu password lama)
+app.put('/api/auth/password', verifyToken, async (req, res) => {
+  const currentPassword = String((req.body || {}).current_password || '');
+  const newPassword = String((req.body || {}).new_password || '');
+
+  if (!currentPassword || !newPassword) {
+    return res.status(400).json({ success: false, message: 'Password lama dan password baru wajib diisi' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ success: false, message: 'Password baru minimal 8 karakter' });
+  }
+
+  try {
+    const [users] = await pool.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
+    if (users.length === 0) {
+      return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+    }
+    const isMatch = await bcrypt.compare(currentPassword, users[0].password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Password lama salah' });
+    }
+    const isSame = await bcrypt.compare(newPassword, users[0].password);
+    if (isSame) {
+      return res.status(400).json({ success: false, message: 'Password baru tidak boleh sama dengan password lama' });
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id]);
+    res.json({ success: true, message: 'Password berhasil diubah. Silakan login ulang.' });
+  } catch (error) {
+    console.error('Password change error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengubah password' });
+  }
+});
+
 
 // --- FILE UPLOAD ROUTE ---
 app.post('/api/upload', verifyToken, upload.single('image'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'Tidak ada gambar yang diunggah' });
+  }
+  if (!verifyUploadedImage(req.file)) {
+    return res.status(400).json({ success: false, message: 'File gambar tidak valid' });
   }
   const relativePath = `/uploads-elkon/${req.file.filename}`;
   res.json({
@@ -196,6 +297,11 @@ app.post('/api/upload', verifyToken, upload.single('image'), (req, res) => {
 app.post('/api/upload-multiple', verifyToken, upload.array('images', 10), (req, res) => {
   if (!req.files || req.files.length === 0) {
     return res.status(400).json({ success: false, message: 'Tidak ada gambar yang diunggah' });
+  }
+  for (const file of req.files) {
+    if (!verifyUploadedImage(file)) {
+      return res.status(400).json({ success: false, message: 'Salah satu file gambar tidak valid' });
+    }
   }
   const imageUrls = req.files.map((file) => `/uploads-elkon/${file.filename}`);
   res.json({
@@ -289,7 +395,7 @@ app.delete('/api/categories/:id', verifyToken, async (req, res) => {
 // --- CONTACTS ROUTES ---
 
 // POST /api/contacts (Public)
-app.post('/api/contacts', async (req, res) => {
+app.post('/api/contacts', contactLimiter, async (req, res) => {
   const { name, email, message } = req.body;
   if (!name || !email || !message) {
     return res.status(400).json({ success: false, message: 'Nama, email, dan pesan wajib diisi' });
@@ -444,12 +550,19 @@ app.delete('/api/banners/:id', verifyToken, async (req, res) => {
 });
 
 
+// GET /api/version (Public) - penanda build yang live di server (untuk verifikasi deploy)
+app.get('/api/version', (req, res) => {
+  res.json({ success: true, build: '2026-10-18-fix3', node: process.version });
+});
+
 // --- SETTINGS ROUTES ---
 
 // GET /api/settings (Public - tanpa kredensial payment gateway)
 app.get('/api/settings', async (req, res) => {
   try {
-    const [rows] = await pool.query("SELECT key_name, value_text FROM settings WHERE key_name NOT LIKE 'ipaymu%'");
+    const [rows] = await pool.query(
+      "SELECT key_name, value_text FROM settings WHERE key_name NOT LIKE 'tripay%'"
+    );
     const settingsMap = {};
     rows.forEach(r => {
       settingsMap[r.key_name] = r.value_text;
@@ -478,25 +591,35 @@ app.get('/api/settings/admin', verifyToken, async (req, res) => {
 
 // PUT /api/settings (Admin)
 app.put('/api/settings', verifyToken, async (req, res) => {
-  const settingsObj = req.body; // e.g. { whatsapp_number: '62...' } atau { ipaymu_va: '...' }
+  const settingsObj = req.body; // e.g. { whatsapp_number: '62...' } atau { tripay_merchant_code: '...' }
   if (!settingsObj || Object.keys(settingsObj).length === 0) {
     return res.status(400).json({ success: false, message: 'Data pengaturan tidak boleh kosong' });
   }
 
-  // Validasi khusus pengaturan payment gateway & URL
+  // Validasi khusus pengaturan payment gateway (Tripay) & URL
   for (const [key, val] of Object.entries(settingsObj)) {
     const valueText = typeof val === 'string' ? val.trim() : String(val ?? '');
-    if (key === 'ipaymu_env' && valueText && !['sandbox', 'production'].includes(valueText.toLowerCase())) {
-      return res.status(400).json({ success: false, message: "Mode iPaymu harus 'sandbox' atau 'production'" });
+    if (key === 'tripay_env' && valueText && !['sandbox', 'production'].includes(valueText.toLowerCase())) {
+      return res.status(400).json({ success: false, message: "Mode Tripay harus 'sandbox' atau 'production'" });
     }
-    if ((key === 'site_url' || key === 'ipaymu_notify_url') && valueText && !/^https?:\/\//i.test(valueText)) {
+    if (
+      (key === 'site_url' || key === 'tripay_callback_url') &&
+      valueText &&
+      !/^https?:\/\//i.test(valueText)
+    ) {
       return res.status(400).json({
         success: false,
         message: `URL ${key === 'site_url' ? 'Website Toko' : 'Callback'} harus diawali http:// atau https://`,
       });
     }
-    if (key === 'ipaymu_va' && valueText && !/^[0-9]+$/.test(valueText)) {
-      return res.status(400).json({ success: false, message: 'Nomor VA iPaymu hanya boleh berisi angka' });
+    if (key === 'tripay_channel' && valueText && !/^[a-z0-9_]+$/i.test(valueText)) {
+      return res.status(400).json({ success: false, message: 'Kode channel Tripay hanya boleh berisi huruf, angka, dan garis bawah (cth. QRIS, BRIVA)' });
+    }
+    if (key === 'tripay_expired_minutes' && valueText) {
+      const minutes = parseInt(valueText, 10);
+      if (Number.isNaN(minutes) || minutes < 10 || minutes > 4320) {
+        return res.status(400).json({ success: false, message: 'Masa berlaku pembayaran Tripay harus antara 10 dan 4320 menit' });
+      }
     }
     if (key === 'business_email' && valueText && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valueText)) {
       return res.status(400).json({ success: false, message: 'Format email bisnis tidak valid' });
@@ -509,8 +632,9 @@ app.put('/api/settings', verifyToken, async (req, res) => {
   try {
     for (const [key, val] of Object.entries(settingsObj)) {
       let valueText = typeof val === "string" ? val.trim() : String(val);
-      if (key === 'ipaymu_env') valueText = valueText.toLowerCase();
-      if (key === 'site_url') valueText = valueText.replace(/\/+$/, '');
+      if (key === 'tripay_env') valueText = valueText.toLowerCase();
+      if (key === 'tripay_channel') valueText = valueText.toUpperCase();
+      if (key === 'site_url' || key === 'tripay_callback_url') valueText = valueText.replace(/\/+$/, '');
       await connection.query(
         'INSERT INTO settings (key_name, value_text) VALUES (?, ?) ON DUPLICATE KEY UPDATE value_text = ?',
         [key, valueText, valueText]
@@ -558,6 +682,37 @@ app.get('/api/admin/stats', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ success: false, message: 'Gagal mengambil data statistik dashboard' });
+  }
+});
+
+// GET /api/admin/logs (Admin) - ring buffer log server untuk tab "Log" di dashboard
+// Mendukung ?limit= (default 100), ?level=info|warn|error, ?search= (substring).
+// Nilai sensitif tidak pernah masuk ke log (API key selalu disamarkan di pemanggilnya).
+app.get('/api/admin/logs', verifyToken, (req, res) => {
+  try {
+    const limitRaw = parseInt(req.query.limit, 10);
+    const limit = Math.min(Math.max(Number.isNaN(limitRaw) ? 100 : limitRaw, 1), LOG_BUFFER_MAX);
+    const level = String(req.query.level || '').toLowerCase();
+    const search = String(req.query.search || '').trim().toLowerCase();
+
+    let entries = logBuffer;
+    if (['info', 'warn', 'error'].includes(level)) {
+      entries = entries.filter((entry) => entry.level === level);
+    }
+    if (search) {
+      entries = entries.filter((entry) => entry.message.toLowerCase().includes(search));
+    }
+
+    res.json({
+      success: true,
+      data: entries.slice(-limit),
+      total: logBuffer.length,
+      filtered: entries.length,
+      bufferLimit: LOG_BUFFER_MAX,
+    });
+  } catch (error) {
+    console.error('Get logs error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil log server' });
   }
 });
 
@@ -915,35 +1070,39 @@ app.delete('/api/products/:id', verifyToken, async (req, res) => {
   }
 });
 
-// --- IPAYMU PAYMENT GATEWAY (konfigurasi & helper) ---
+// --- TRIPAY PAYMENT GATEWAY (satu-satunya gateway yang dipakai checkout) ---
 // Kredensial TIDAK di-hardcode: dibaca dari tabel `settings` dan diatur
-// dari dashboard admin (tab Setting > bagian Payment Gateway).
+// dari dashboard admin (menu Payment Gateway).
 
-async function getIpaymuConfig() {
+async function getTripayConfig() {
   const [rows] = await pool.query(
-    "SELECT key_name, value_text FROM settings WHERE key_name IN ('ipaymu_env', 'ipaymu_va', 'ipaymu_api_key', 'ipaymu_notify_url', 'site_url')"
+    "SELECT key_name, value_text FROM settings WHERE key_name IN ('tripay_env', 'tripay_merchant_code', 'tripay_api_key', 'tripay_private_key', 'tripay_channel', 'tripay_expired_minutes', 'tripay_callback_url', 'site_url')"
   );
   const map = {};
   rows.forEach((r) => {
     map[r.key_name] = String(r.value_text || '').trim();
   });
 
-  const isProduction = (map.ipaymu_env || 'sandbox').toLowerCase() === 'production';
-  const defaultBaseUrl = isProduction ? 'https://my.ipaymu.com/api/v2' : 'https://sandbox.ipaymu.com/api/v2';
+  const isProduction = (map.tripay_env || 'sandbox').toLowerCase() === 'production';
+  const defaultBaseUrl = isProduction ? 'https://tripay.co.id/api' : 'https://tripay.co.id/api-sandbox';
+  const expiredMinutes = parseInt(map.tripay_expired_minutes, 10);
   return {
-    // IPAYMU_BASE_URL hanya untuk debug/testing lokal (opsional) — bukan kredensial
-    baseUrl: (process.env.IPAYMU_BASE_URL || defaultBaseUrl).replace(/\/+$/, ''),
-    va: map.ipaymu_va || '',
-    apiKey: map.ipaymu_api_key || '',
+    // TRIPAY_BASE_URL hanya untuk debug/testing lokal (opsional) — bukan kredensial
+    baseUrl: (process.env.TRIPAY_BASE_URL || defaultBaseUrl).replace(/\/+$/, ''),
+    merchantCode: map.tripay_merchant_code || '',
+    apiKey: map.tripay_api_key || '',
+    privateKey: map.tripay_private_key || '',
+    channel: (map.tripay_channel || '').toUpperCase(),
+    expiredMinutes: Number.isFinite(expiredMinutes) && expiredMinutes >= 10 ? expiredMinutes : 60,
     siteUrl: (map.site_url || '').replace(/\/+$/, ''),
-    notifyUrl: map.ipaymu_notify_url || '',
+    callbackUrl: (map.tripay_callback_url || '').replace(/\/+$/, ''),
     isProduction,
   };
 }
 
-async function isIpaymuConfigured() {
-  const { va, apiKey } = await getIpaymuConfig();
-  return Boolean(va && apiKey);
+async function isTripayConfigured() {
+  const { merchantCode, apiKey, privateKey, channel } = await getTripayConfig();
+  return Boolean(merchantCode && apiKey && privateKey && channel);
 }
 
 // Origin request saat ini — fallback jika `site_url` belum diatur di Setting admin
@@ -955,208 +1114,117 @@ function getRequestOrigin(req) {
   return host ? `${proto}://${host}` : '';
 }
 
-// Timestamp request iPaymu: YYYYMMDDHHmmss (waktu lokal server)
-function formatIpaymuTimestamp(date = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0');
-  return (
-    date.getFullYear().toString() +
-    pad(date.getMonth() + 1) +
-    pad(date.getDate()) +
-    pad(date.getHours()) +
-    pad(date.getMinutes()) +
-    pad(date.getSeconds())
-  );
-}
+// Sesi pembayaran Tripay (closed payment):
+// signature = HMAC-SHA256(merchantCode + merchantRef + amount, privateKey)
+async function createTripayPaymentSession({ referenceId, items, buyer, fallbackOrigin }) {
+  const { baseUrl, merchantCode, apiKey, privateKey, channel, expiredMinutes, siteUrl, callbackUrl, isProduction } =
+    await getTripayConfig();
 
-// Helper kriptografi universal: kompatibel dengan Node.js crypto maupun Web Crypto API (globalThis.crypto)
-async function computeSha256Hex(str) {
-  if (nodeCrypto && typeof nodeCrypto.createHash === 'function') {
-    return nodeCrypto.createHash('sha256').update(str).digest('hex');
-  }
-  if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto?.subtle) {
-    const enc = new TextEncoder();
-    const buf = await globalThis.crypto.subtle.digest('SHA-256', enc.encode(str));
-    return Buffer.from(buf).toString('hex');
-  }
-  throw new Error('Modul crypto untuk SHA-256 tidak tersedia di environment server');
-}
-
-async function computeHmacSha256Hex(secret, str) {
-  if (nodeCrypto && typeof nodeCrypto.createHmac === 'function') {
-    return nodeCrypto.createHmac('sha256', secret).update(str).digest('hex');
-  }
-  if (typeof globalThis.crypto !== 'undefined' && globalThis.crypto?.subtle) {
-    const enc = new TextEncoder();
-    const key = await globalThis.crypto.subtle.importKey(
-      'raw',
-      enc.encode(String(secret)),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    const sig = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(str));
-    return Buffer.from(sig).toString('hex');
-  }
-  throw new Error('Modul crypto untuk HMAC-SHA256 tidak tersedia di environment server');
-}
-
-function timingSafeCompare(a, b) {
-  const bufA = Buffer.from(String(a), 'utf8');
-  const bufB = Buffer.from(String(b), 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  if (nodeCrypto && typeof nodeCrypto.timingSafeEqual === 'function') {
-    return nodeCrypto.timingSafeEqual(bufA, bufB);
-  }
-  let result = 0;
-  for (let i = 0; i < bufA.length; i += 1) {
-    result |= bufA[i] ^ bufB[i];
-  }
-  return result === 0;
-}
-
-function getRandomIntSafe(min, max) {
-  if (nodeCrypto && typeof nodeCrypto.randomInt === 'function') {
-    return nodeCrypto.randomInt(min, max);
-  }
-  const range = max - min;
-  if (typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto?.getRandomValues === 'function') {
-    const arr = new Uint32Array(1);
-    globalThis.crypto.getRandomValues(arr);
-    return min + (arr[0] % range);
-  }
-  return min + Math.floor(Math.random() * range);
-}
-
-// Signature request iPaymu v2:
-//   String to Sign = Method + ":" + VA + ":" + SHA256(bodyJson) + ":" + ApiKey
-//   Signature      = HMAC-SHA256(String to Sign, ApiKey)
-async function buildIpaymuRequestSignature(method, va, apiKey, bodyJson) {
-  const bodyHash = await computeSha256Hex(bodyJson);
-  const stringToSign = `${method}:${va}:${bodyHash}:${apiKey}`;
-  return await computeHmacSha256Hex(apiKey, stringToSign);
-}
-
-// Normalisasi payload callback sesuai dokumentasi resmi iPaymu sebelum validasi signature
-function normalizeIpaymuCallbackData(rawData) {
-  const result = {};
-  for (const key of Object.keys(rawData)) {
-    const val = rawData[key];
-    if (key === 'signature') continue; // field signature tidak ikut dihitung
-    if (key === 'is_escrow') {
-      result[key] = val === 'true' || val === '1' || val === 1 || val === true;
-    } else if (['trx_id', 'status_code', 'transaction_status_code', 'paid_off'].includes(key)) {
-      const parsed = parseInt(val, 10);
-      result[key] = Number.isNaN(parsed) ? 0 : parsed;
-    } else if (key === 'additional_info') {
-      result[key] = val === '[]' ? [] : val;
-    } else {
-      result[key] = String(val);
-    }
-  }
-  if (!Object.prototype.hasOwnProperty.call(result, 'additional_info')) {
-    result['additional_info'] = [];
-  }
-  return result;
-}
-
-// Urutkan key A-Z (meniru ksort milik PHP)
-function sortObjectKeysAlphabetically(obj) {
-  return Object.keys(obj)
-    .sort((a, b) => a.localeCompare(b))
-    .reduce((acc, key) => {
-      acc[key] = obj[key];
-      return acc;
-    }, {});
-}
-
-// Validasi header X-Signature callback: HMAC-SHA256(json ternormalisasi, secret = Nomor VA)
-async function isValidIpaymuCallbackSignature(rawData, receivedSignature, va) {
-  if (!receivedSignature) return false;
-  const sorted = sortObjectKeysAlphabetically(normalizeIpaymuCallbackData(rawData));
-  let jsonBody = JSON.stringify(sorted);
-  jsonBody = jsonBody.replace(/\//g, '\\/');
-  const expected = await computeHmacSha256Hex(va, jsonBody);
-  return timingSafeCompare(expected, receivedSignature);
-}
-
-// Buat sesi pembayaran Redirect di iPaymu -> { sessionId, paymentUrl }
-async function createIpaymuPaymentSession({ referenceId, items, buyer, fallbackOrigin }) {
-  const { baseUrl, va, apiKey, siteUrl, notifyUrl } = await getIpaymuConfig();
-
-  // URL toko untuk returnUrl/cancelUrl: dari Setting admin, fallback ke origin request
+  // URL toko untuk return/callback: dari Setting admin, fallback ke origin request
   const appUrl = siteUrl || fallbackOrigin || '';
   if (!appUrl) {
-    const paymentError = new Error('URL Website Toko belum diatur. Isi di Admin > Setting > Payment Gateway.');
+    const paymentError = new Error('URL Website Toko belum diatur. Isi di Admin > Payment Gateway.');
     paymentError.isPaymentError = true;
     throw paymentError;
   }
 
-  const body = {
-    product: items.map((item) => item.product_name),
-    qty: items.map((item) => String(item.quantity)),
-    price: items.map((item) => String(Math.round(Number(item.price)))),
-    description: items.map((item) => `${item.variant_size || '-'} / ${item.variant_color || '-'}${item.sku ? ` (${item.sku})` : ''}`),
-    returnUrl: `${appUrl}/order/${referenceId}`,
-    notifyUrl: notifyUrl || `${appUrl}/api/ipaymu/callback`,
-    cancelUrl: `${appUrl}/order/${referenceId}?payment=cancelled`,
-    referenceId,
-    buyerName: buyer.name,
-    buyerEmail: buyer.email || '',
-    buyerPhone: buyer.phone,
-    expired: 24, // jam
-  };
+  const amount = items.reduce((sum, item) => sum + Math.round(Number(item.price)) * item.quantity, 0);
+  const signature = crypto
+    .createHmac('sha256', privateKey)
+    .update(`${merchantCode}${referenceId}${amount}`)
+    .digest('hex');
 
-  const bodyJson = JSON.stringify(body);
-  const signature = await buildIpaymuRequestSignature('POST', va, apiKey, bodyJson);
+  const body = {
+    method: channel,
+    merchant_ref: referenceId,
+    amount,
+    customer_name: buyer.name,
+    customer_email: buyer.email || '',
+    customer_phone: buyer.phone,
+    order_items: items.map((item) => ({
+      sku: item.sku || `VAR-${item.variant_id}`,
+      name: item.product_name,
+      price: Math.round(Number(item.price)),
+      quantity: item.quantity,
+      product_url: `${appUrl}/product/${item.product_id}`,
+    })),
+    callback_url: callbackUrl || `${appUrl}/api/tripay/callback`,
+    return_url: `${appUrl}/order/${referenceId}`,
+    expired_time: Math.floor(Date.now() / 1000) + expiredMinutes * 60,
+    signature,
+  };
 
   let response;
   try {
-    response = await fetch(`${baseUrl}/payment`, {
+    response = await fetch(`${baseUrl}/transaction/create`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        va,
-        signature,
-        timestamp: formatIpaymuTimestamp(),
+        Authorization: `Bearer ${apiKey}`,
       },
-      body: bodyJson,
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(60000),
     });
   } catch (networkError) {
-    console.error(
-      'iPaymu fetch error:',
-      networkError.name,
-      networkError.message,
-      networkError.cause ? `| cause: ${networkError.cause.message}` : ''
-    );
-    const paymentError = new Error('Tidak dapat menghubungi iPaymu. Periksa koneksi internet server.');
+    console.error('Tripay fetch error:', networkError.name, networkError.message);
+    const paymentError = new Error('Tidak dapat menghubungi Tripay. Periksa koneksi internet server.');
     paymentError.isPaymentError = true;
     throw paymentError;
   }
 
   const result = await response.json().catch(() => null);
-  if (!result || Number(result.Status) !== 200 || !result.Data || !result.Data.Url) {
+  // Log ringkas untuk diagnosis dari tab Log admin (tanpa apiKey/privateKey)
+  console.log(
+    'Tripay payment response:',
+    JSON.stringify({
+      httpStatus: response.status,
+      success: result ? result.success : null,
+      message: result ? result.message : null,
+      baseUrl,
+      env: isProduction ? 'production' : 'sandbox',
+      channel,
+      referenceId,
+    })
+  );
+
+  const data = result && result.data;
+  if (!result || !result.success || !data || !data.reference) {
     const paymentError = new Error(
-      result && result.Message ? result.Message : 'Gagal membuat sesi pembayaran di iPaymu'
+      result && result.message ? `Tripay: ${result.message}` : 'Gagal membuat sesi pembayaran di Tripay'
     );
     paymentError.isPaymentError = true;
     throw paymentError;
   }
 
   return {
-    sessionId: result.Data.SessionID || null,
-    paymentUrl: result.Data.Url,
+    sessionId: String(data.reference),
+    paymentUrl: data.checkout_url || data.pay_url || '',
   };
 }
 
 // Reference ID unik pesanan, contoh: ELK-20261017-A1B2C3
+function secureRandomIndex(max) {
+  try {
+    const nc = require('crypto');
+    if (nc && typeof nc.randomInt === 'function') return nc.randomInt(0, max);
+    if (nc && typeof nc.randomBytes === 'function') return nc.randomBytes(4).readUInt32BE(0) % max;
+  } catch (_) { /* abaikan, lanjut ke fallback */ }
+  const g = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+  if (g && typeof g.getRandomValues === 'function') {
+    const arr = new Uint32Array(1);
+    g.getRandomValues(arr);
+    return arr[0] % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+
 async function generateOrderReference(connection) {
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 5; attempt += 1) {
     let suffix = '';
     for (let i = 0; i < 6; i += 1) {
-      suffix += alphabet[getRandomIntSafe(0, alphabet.length)];
+      suffix += alphabet[secureRandomIndex(alphabet.length)];
     }
     const referenceId = `ELK-${datePart}-${suffix}`;
     const [existing] = await connection.query('SELECT id FROM orders WHERE reference_id = ?', [referenceId]);
@@ -1188,12 +1256,14 @@ const ORDER_STATUSES = ['pending', 'paid', 'processing', 'shipped', 'completed',
 
 // --- ORDERS ROUTES ---
 
-// POST /api/orders (Public) - buat pesanan + sesi pembayaran iPaymu
-app.post('/api/orders', async (req, res) => {
-  if (!(await isIpaymuConfigured())) {
+// POST /api/orders (Public) - buat pesanan + sesi pembayaran Tripay
+app.post('/api/orders', orderLimiter, async (req, res) => {
+  const activeGateway = 'tripay';
+  const isGatewayConfigured = await isTripayConfigured();
+  if (!isGatewayConfigured) {
     return res.status(503).json({
       success: false,
-      message: 'Payment gateway belum dikonfigurasi. Lengkapi di Admin > Setting > Payment Gateway',
+      message: 'Payment gateway Tripay belum dikonfigurasi. Lengkapi di Admin > Payment Gateway.',
     });
   }
 
@@ -1206,6 +1276,7 @@ app.post('/api/orders', async (req, res) => {
   const cleanCity = String(city || '').trim();
   const cleanNotes = String(notes || '').trim();
 
+  // Email wajib diisi: dibutuhkan gateway pembayaran (Tripay menolak customer_email kosong)
   if (!cleanName || !cleanPhone || !cleanEmail || !cleanAddress || !cleanCity) {
     return res.status(400).json({ success: false, message: 'Nama, telepon, email, alamat, dan kota wajib diisi' });
   }
@@ -1282,8 +1353,8 @@ app.post('/api/orders', async (req, res) => {
     const [orderResult] = await connection.query(
       `INSERT INTO orders
         (reference_id, buyer_name, buyer_phone, buyer_email, address, city, notes, subtotal, total, status, payment_provider)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'ipaymu')`,
-      [referenceId, cleanName, cleanPhone, cleanEmail || null, cleanAddress, cleanCity, cleanNotes || null, subtotal, subtotal]
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+      [referenceId, cleanName, cleanPhone, cleanEmail || null, cleanAddress, cleanCity, cleanNotes || null, subtotal, subtotal, activeGateway]
     );
     const orderId = orderResult.insertId;
 
@@ -1307,13 +1378,14 @@ app.post('/api/orders', async (req, res) => {
       );
     }
 
-    // Buat sesi pembayaran iPaymu; kalau gagal, seluruh transaksi di-rollback
-    const payment = await createIpaymuPaymentSession({
+    // Buat sesi pembayaran Tripay; kalau gagal, seluruh transaksi di-rollback
+    const paymentPayload = {
       referenceId,
       items: orderItems,
       buyer: { name: cleanName, phone: cleanPhone, email: cleanEmail },
       fallbackOrigin: getRequestOrigin(req),
-    });
+    };
+    const payment = await createTripayPaymentSession(paymentPayload);
 
     await connection.query('UPDATE orders SET payment_session_id = ?, payment_url = ? WHERE id = ?', [
       payment.sessionId,
@@ -1329,6 +1401,7 @@ app.post('/api/orders', async (req, res) => {
       data: {
         id: orderId,
         reference_id: referenceId,
+        payment_provider: activeGateway,
         total: subtotal,
         payment_url: payment.paymentUrl,
       },
@@ -1339,31 +1412,51 @@ app.post('/api/orders', async (req, res) => {
     if (error.isPaymentError) {
       return res.status(502).json({ success: false, message: `Gagal membuat sesi pembayaran: ${error.message}` });
     }
-    res.status(400).json({ success: false, message: error.message || 'Gagal membuat pesanan' });
+    // Jangan teruskan pesan error mentah (bisa berisi detail DB/internal) ke publik
+    const isOperational = !error.code && error.name === 'Error';
+    res.status(400).json({
+      success: false,
+      message: isOperational && error.message ? error.message : 'Gagal membuat pesanan. Silakan coba lagi.',
+    });
   } finally {
     connection.release();
   }
 });
 
-// POST /api/ipaymu/callback (Public) - webhook notifikasi pembayaran dari iPaymu
-app.post('/api/ipaymu/callback', async (req, res) => {
-  const { va } = await getIpaymuConfig();
-  const rawData = req.body || {};
-  const receivedSignature = req.headers['x-signature'];
+// POST /api/tripay/callback (Public) - webhook notifikasi pembayaran dari Tripay
+// Keamanan: header X-Callback-Signature = HMAC-SHA256(body mentah, private key) wajib valid.
+app.post('/api/tripay/callback', callbackLimiter, async (req, res) => {
+  const { privateKey } = await getTripayConfig();
 
   try {
-    if (!va) {
-      console.error('iPaymu callback: Payment gateway belum dikonfigurasi di Setting admin, signature tidak dapat divalidasi');
-      return res.status(400).send('Invalid Signature');
-    }
-    if (!(await isValidIpaymuCallbackSignature(rawData, receivedSignature, va))) {
-      console.warn('iPaymu callback: signature tidak valid');
-      return res.status(400).send('Invalid Signature');
+    if (!privateKey) {
+      console.error('Tripay callback: private key belum dikonfigurasi, signature tidak dapat divalidasi');
+      return res.status(400).json({ success: false });
     }
 
-    const referenceId = rawData.referenceId || rawData.reference_id;
+    const rawBody = req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body || {});
+    const expectedSignature = crypto.createHmac('sha256', privateKey).update(rawBody).digest('hex');
+    const receivedSignature = String(req.headers['x-callback-signature'] || '').toLowerCase();
+
+    const signatureValid =
+      receivedSignature.length === expectedSignature.length &&
+      crypto.timingSafeEqual(Buffer.from(receivedSignature), Buffer.from(expectedSignature));
+
+    if (!signatureValid) {
+      console.warn('Tripay callback: signature tidak valid');
+      return res.status(401).json({ success: false });
+    }
+
+    // Hanya memproses event perubahan status pembayaran
+    const event = String(req.headers['x-callback-event'] || '');
+    if (event && event !== 'payment_status') {
+      return res.status(200).json({ success: true });
+    }
+
+    const data = (req.body && req.body.data) || req.body || {};
+    const referenceId = data.merchant_ref;
     if (!referenceId) {
-      return res.status(200).json({ status: 'OK', message: 'Callback tanpa reference_id diabaikan' });
+      return res.status(200).json({ success: true, message: 'Callback tanpa merchant_ref diabaikan' });
     }
 
     const connection = await pool.getConnection();
@@ -1373,35 +1466,41 @@ app.post('/api/ipaymu/callback', async (req, res) => {
       const [orders] = await connection.query('SELECT * FROM orders WHERE reference_id = ? FOR UPDATE', [referenceId]);
       if (orders.length === 0) {
         await connection.rollback();
-        return res.status(200).json({ status: 'OK', message: 'Pesanan tidak ditemukan, diabaikan' });
+        return res.status(200).json({ success: true, message: 'Pesanan tidak ditemukan, diabaikan' });
       }
 
       const order = orders[0];
-      const statusCode = parseInt(rawData.status_code ?? rawData.transaction_status_code ?? 0, 10);
-      const statusText = String(rawData.status || '').toLowerCase();
+      const status = String(data.status || '').toUpperCase();
 
-      if (statusCode === 1 || statusText === 'berhasil') {
-        // Idempotent: jangan proses ulang kalau sudah paid
+      if (status === 'PAID') {
+        // Idempotent: jangan proses ulang kalau sudah paid.
+        // Kolom ipaymu_trx_id menyimpan reference Tripay (nama kolom historis, dipertahankan agar data lama tetap terbaca).
         if (order.status !== 'paid') {
           await connection.query(
             "UPDATE orders SET status = 'paid', paid_at = NOW(), ipaymu_trx_id = ?, payment_channel = ? WHERE id = ?",
             [
-              rawData.trx_id !== undefined && rawData.trx_id !== null ? String(rawData.trx_id) : null,
-              rawData.channel !== undefined && rawData.channel !== null ? String(rawData.channel) : null,
+              data.reference !== undefined && data.reference !== null ? String(data.reference) : null,
+              data.payment_method_code !== undefined && data.payment_method_code !== null
+                ? String(data.payment_method_code)
+                : null,
               order.id,
             ]
           );
           await applyOrderStockReduction(connection, order.id);
         }
-      } else if (statusCode === -2 || statusText === 'expired') {
+      } else if (status === 'EXPIRED') {
         if (order.status === 'pending') {
           await connection.query("UPDATE orders SET status = 'expired' WHERE id = ?", [order.id]);
         }
+      } else if (status === 'FAILED') {
+        if (order.status === 'pending') {
+          await connection.query("UPDATE orders SET status = 'cancelled' WHERE id = ?", [order.id]);
+        }
       }
-      // status_code 0 / pending: tidak ada perubahan
+      // REFUND: tidak mengubah status otomatis, ditangani manual oleh admin
 
       await connection.commit();
-      res.status(200).json({ status: 'OK' });
+      res.status(200).json({ success: true });
     } catch (innerError) {
       await connection.rollback();
       throw innerError;
@@ -1409,8 +1508,8 @@ app.post('/api/ipaymu/callback', async (req, res) => {
       connection.release();
     }
   } catch (error) {
-    console.error('iPaymu callback error:', error);
-    res.status(500).json({ status: 'ERROR', message: 'Gagal memproses callback' });
+    console.error('Tripay callback error:', error);
+    res.status(500).json({ success: false, message: 'Gagal memproses callback' });
   }
 });
 
@@ -1567,6 +1666,27 @@ app.put('/api/orders/:id/status', verifyToken, async (req, res) => {
   } finally {
     connection.release();
   }
+});
+
+
+// Error handler terakhir: semua error tak tertangani (termasuk MulterError dan
+// penolakan CORS) dibalas JSON generik, bukan HTML/stack trace
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err && err.message ? err.message : err);
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, message: 'Ukuran file maksimal 5MB' });
+    }
+    return res.status(400).json({ success: false, message: 'Upload gagal. Periksa file Anda.' });
+  }
+  if (err && err.message === 'Only images are allowed!') {
+    return res.status(400).json({ success: false, message: 'Hanya file gambar yang diizinkan' });
+  }
+  if (err && err.message === 'Origin tidak diizinkan oleh CORS') {
+    return res.status(403).json({ success: false, message: 'Akses ditolak' });
+  }
+  res.status(500).json({ success: false, message: 'Terjadi kesalahan sistem' });
 });
 
 
