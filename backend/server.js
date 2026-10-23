@@ -3,11 +3,15 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 require('dotenv').config();
 
 const app = express.Router();
+
+app.use(cors());
 
 
 app.use(
@@ -624,6 +628,98 @@ app.delete('/api/banners/:id', verifyToken, async (req, res) => {
 // GET /api/version (Public) - penanda build yang live di server (untuk verifikasi deploy)
 app.get('/api/version', (req, res) => {
   res.json({ success: true, build: '2026-10-18-fix3', node: process.version });
+});
+
+
+// Tidak pernah mengembalikan kredensial — hanya status kesiapan + info tampil.
+app.get('/api/payment-methods', async (req, res) => {
+  try {
+    const [tripayEnabled, paypalEnabled] = await Promise.all([isGatewayEnabled('tripay'), isGatewayEnabled('paypal')]);
+    const [tripayReady, paypalReady] = await Promise.all([isTripayConfigured(), isPaypalConfigured()]);
+    const { rate, currency } = await getPaypalConfig();
+    res.json({
+      success: true,
+      data: {
+        tripay: { enabled: tripayEnabled && tripayReady },
+        paypal: { enabled: paypalEnabled && paypalReady, currency, rate },
+      },
+    });
+  } catch (error) {
+    console.error('Get payment methods error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil metode pembayaran' });
+  }
+});
+
+// POST /api/paypal/capture (Public) - dipanggil halaman status pesanan setelah
+// pembeli kembali dari PayPal (?paypal=return). Capture diotorisasi di sisi server,
+// kebenaran diambil dari API PayPal (bukan dari parameter browser).
+app.post('/api/paypal/capture', orderLimiter, async (req, res) => {
+  const referenceId = String((req.body && req.body.reference_id) || '').trim();
+  if (!referenceId) {
+    return res.status(400).json({ success: false, message: 'Kode referensi pesanan wajib diisi' });
+  }
+  try {
+    const [orders] = await pool.query('SELECT * FROM orders WHERE reference_id = ?', [referenceId]);
+    if (orders.length === 0) {
+      return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+    const order = orders[0];
+    if (order.status === 'paid') {
+      return res.json({ success: true, message: 'Pesanan sudah dibayar' });
+    }
+    if (order.payment_provider !== 'paypal' || !order.payment_session_id) {
+      return res.status(400).json({ success: false, message: 'Pesanan ini bukan pembayaran PayPal' });
+    }
+    const paypalOrderId = String(order.payment_session_id);
+    const status = await getPaypalOrderStatus(paypalOrderId);
+    if (!status) {
+      return res.status(502).json({ success: false, message: 'Tidak dapat memeriksa status ke PayPal' });
+    }
+    if (status.status === 'APPROVED') {
+      // Pembeli sudah menyetujui di PayPal tapi dana belum ditangkap -> capture sekarang
+      const { baseUrl, token } = await getPaypalAccessToken();
+      const captureRes = await fetch(`${baseUrl}/v2/checkout/orders/${encodeURIComponent(paypalOrderId)}/capture`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(60000),
+      });
+      const captureResult = await captureRes.json().catch(() => null);
+      console.log(
+        'PayPal capture response:',
+        JSON.stringify({ httpStatus: captureRes.status, paypalOrderId, status: captureResult && captureResult.status, referenceId })
+      );
+      if (!captureRes.ok || !captureResult || captureResult.status !== 'COMPLETED') {
+        return res.status(502).json({ success: false, message: 'Capture PayPal gagal. Coba lagi atau hubungi kami.' });
+      }
+      const unit = (captureResult.purchase_units || [])[0] || {};
+      const payment = unit.payments || {};
+      const capture = (payment.captures || [])[0] || {};
+      const capturedUsd = Number((capture.amount || {}).value || 0);
+      const payerEmail = captureResult.payer && captureResult.payer.email_address;
+      const settled = await settlePaypalOrderByCapture({ referenceId, paypalOrderId, capturedUsd, payerEmail });
+      if (!settled.ok) {
+        return res.status(502).json({ success: false, message: 'Verifikasi nominal PayPal gagal. Hubungi kami.' });
+      }
+      return res.json({ success: true, message: 'Pembayaran PayPal berhasil' });
+    }
+    if (status.status === 'COMPLETED') {
+      // Sudah tercapture sebelumnya (mis. via webhook) -> sinkronkan status lokal
+      const unit = (status.purchase_units || [])[0] || {};
+      const payment = unit.payments || {};
+      const capture = (payment.captures || [])[0] || {};
+      const capturedUsd = Number((capture.amount || {}).value || 0);
+      const payerEmail = status.payer && status.payer.email_address;
+      await settlePaypalOrderByCapture({ referenceId, paypalOrderId, capturedUsd, payerEmail });
+      return res.json({ success: true, message: 'Pembayaran PayPal berhasil' });
+    }
+    return res.status(400).json({ success: false, message: 'Pembayaran PayPal belum disetujui. Selesaikan di halaman PayPal.' });
+  } catch (error) {
+    console.error('PayPal capture error:', error.message);
+    if (error.isPaymentError) {
+      return res.status(502).json({ success: false, message: `Gagal memverifikasi PayPal: ${error.message}` });
+    }
+    res.status(500).json({ success: false, message: 'Gagal memproses capture PayPal' });
+  }
 });
 
 // --- SETTINGS ROUTES ---
@@ -1760,5 +1856,14 @@ app.use((err, req, res, next) => {
 });
 
 
+
+if (require.main === module) {
+  const standaloneApp = express();
+  standaloneApp.use(app);
+  const PORT = process.env.PORT || 5000;
+  standaloneApp.listen(PORT, () => {
+    console.log(`elkon backend server is running on port ${PORT}`);
+  });
+}
 
 module.exports = app;
