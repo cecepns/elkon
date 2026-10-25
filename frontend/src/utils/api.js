@@ -8,7 +8,7 @@ import axios from "axios";
 // Override manual tetap bisa lewat VITE_API_URL / VITE_MEDIA_URL.
 const resolveApiBaseUrl = () => {
   if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-  return "/api";
+  return "https://api.kingcreativestudio.my.id/elkon/api";
 };
 
 export const API_BASE_URL = resolveApiBaseUrl();
