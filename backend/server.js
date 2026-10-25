@@ -29,6 +29,18 @@ const LOG_DIR = path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'server.log');
 const logBuffer = [];
 
+async function isGatewayEnabled(name) {
+  const [rows] = await pool.query('SELECT value_text FROM settings WHERE key_name = ?', [`${name}_enabled`]);
+  const value = String((rows[0] && rows[0].value_text) || '').trim();
+  // Default: aktif bila belum pernah diatur (migrasi lama tanpa toggle)
+  return value === '' ? true : value === '1';
+}
+
+async function isPaypalConfigured() {
+  const { clientId, secret } = await getPaypalConfig();
+  return Boolean(clientId && secret);
+}
+
 function stringifyLogArg(value) {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.stack || value.message;
