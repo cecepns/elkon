@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { request } from "../../utils/request";
 import { API_ENDPOINTS } from "../../utils/endpoints";
 import { ORDER_STATUS_OPTIONS, getOrderStatusMeta } from "../../utils/orderStatus";
+import { downloadShippingLabelPdf } from "../../utils/shippingLabelPdf";
 import {
   Loader2,
   X,
@@ -12,6 +13,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Download,
+  Trash2,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -59,6 +62,24 @@ export default function AdminOrders({ onActionSuccess }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [newStatus, setNewStatus] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+
+  // Delete & PDF states
+  const [itemToDelete, setItemToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [downloadingId, setDownloadingId] = useState(null);
+  const [storeSettings, setStoreSettings] = useState(null);
+
+  // Ambil pengaturan toko (untuk info pengirim pada label PDF)
+  useEffect(() => {
+    request
+      .get(API_ENDPOINTS.SETTINGS.PUBLIC)
+      .then((res) => {
+        if (res?.success && res?.data) {
+          setStoreSettings(res.data);
+        }
+      })
+      .catch((err) => console.error("Gagal memuat info toko:", err));
+  }, []);
 
   // Debounce search 300ms (standar admin panel)
   useEffect(() => {
@@ -127,6 +148,60 @@ export default function AdminOrders({ onActionSuccess }) {
       console.error(error);
     } finally {
       setSavingStatus(false);
+    }
+  };
+
+  const executeDeleteOrder = async () => {
+    if (!itemToDelete) return;
+    const toastId = toast.loading("Sedang menghapus pesanan...");
+    setDeleting(true);
+    try {
+      const res = await request.delete(API_ENDPOINTS.ORDERS.DELETE(itemToDelete.id));
+      if (res.success) {
+        toast.success("Pesanan berhasil dihapus.", { id: toastId });
+        setItemToDelete(null);
+        if (detail && detail.id === itemToDelete.id) {
+          setDetail(null);
+        }
+        fetchOrders();
+        if (onActionSuccess) onActionSuccess();
+      }
+    } catch (err) {
+      console.error("Gagal menghapus pesanan:", err);
+      toast.error("Gagal menghapus pesanan.", { id: toastId });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDownloadPdf = async (order) => {
+    if (!order) return;
+    setDownloadingId(order.id);
+    try {
+      // Ambil detail lengkap jika pesanan belum memiliki daftar item atau alamat lengkap
+      let fullOrder = order;
+      if (!order.items || order.items.length === 0 || !order.address) {
+        const res = await request.get(API_ENDPOINTS.ORDERS.DETAIL(order.id));
+        if (res.success && res.data) {
+          fullOrder = res.data;
+        }
+      }
+
+      downloadShippingLabelPdf({
+        order: fullOrder,
+        storeInfo: {
+          name: "ELKON Official Store",
+          phone: storeSettings?.whatsapp_number || "0878-6540-7492",
+          city: "Indonesia",
+        },
+      });
+
+      toast.success("PDF Label kurir berhasil diunduh.");
+    } catch (error) {
+      console.error("Gagal mengunduh label pengiriman:", error);
+      toast.error("Gagal membuat PDF label pengiriman.");
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -262,13 +337,34 @@ export default function AdminOrders({ onActionSuccess }) {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => openDetail(order)}
-                          className="text-stone-500 hover:text-stone-900 p-1 hover:bg-stone-100 rounded transition-all"
-                          title="Lihat Detail"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center justify-end space-x-1.5">
+                          <button
+                            onClick={() => handleDownloadPdf(order)}
+                            disabled={downloadingId === order.id}
+                            className="text-stone-500 hover:text-stone-950 p-1.5 hover:bg-stone-100 rounded transition-all disabled:opacity-40"
+                            title="Download PDF Label Kurir"
+                          >
+                            {downloadingId === order.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin text-stone-700" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </button>
+                          <button
+                            onClick={() => openDetail(order)}
+                            className="text-stone-500 hover:text-stone-950 p-1.5 hover:bg-stone-100 rounded transition-all"
+                            title="Lihat Detail"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => setItemToDelete(order)}
+                            className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded transition-all"
+                            title="Hapus Pesanan"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -344,15 +440,40 @@ export default function AdminOrders({ onActionSuccess }) {
               </div>
             ) : (
               <>
-                <div className="space-y-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Detail Pesanan</span>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h3 className="font-mono text-base font-semibold text-stone-900">{detail.reference_id}</h3>
-                    <span className={`inline-flex px-2 py-0.5 text-[9px] font-bold uppercase rounded ${getOrderStatusMeta(detail.status).badge}`}>
-                      {getOrderStatusMeta(detail.status).label}
-                    </span>
+                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 pr-8">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">Detail Pesanan</span>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="font-mono text-base font-semibold text-stone-900">{detail.reference_id}</h3>
+                      <span className={`inline-flex px-2 py-0.5 text-[9px] font-bold uppercase rounded ${getOrderStatusMeta(detail.status).badge}`}>
+                        {getOrderStatusMeta(detail.status).label}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-stone-400">Dibuat {formatDateTime(detail.created_at)}</p>
                   </div>
-                  <p className="text-[11px] text-stone-400">Dibuat {formatDateTime(detail.created_at)}</p>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 sm:pt-0">
+                    <button
+                      onClick={() => handleDownloadPdf(detail)}
+                      disabled={downloadingId === detail.id}
+                      className="inline-flex items-center space-x-1.5 px-3 py-2 bg-stone-900 text-white hover:bg-stone-800 text-xs font-semibold uppercase tracking-wider transition-all disabled:opacity-50"
+                      title="Download PDF Label Kurir"
+                    >
+                      {downloadingId === detail.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Download className="h-3.5 w-3.5" />
+                      )}
+                      <span>Download PDF Kurir</span>
+                    </button>
+                    <button
+                      onClick={() => setItemToDelete(detail)}
+                      className="inline-flex items-center space-x-1 px-3 py-2 border border-red-200 text-xs font-semibold uppercase tracking-wider text-red-650 hover:bg-red-50 transition-all"
+                      title="Hapus Pesanan"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Hapus</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Info pembeli */}
@@ -372,8 +493,10 @@ export default function AdminOrders({ onActionSuccess }) {
 
                 {detail.notes && (
                   <div className="bg-amber-50/60 border border-amber-150 p-4">
-                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1">Catatan Pembeli</h4>
-                    <p className="text-xs text-stone-700 whitespace-pre-wrap">{detail.notes}</p>
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-700 mb-1">
+                      Deskripsi / Catatan Pembeli Saat Checkout
+                    </h4>
+                    <p className="text-xs text-stone-700 whitespace-pre-wrap leading-relaxed">{detail.notes}</p>
                   </div>
                 )}
 
@@ -386,7 +509,7 @@ export default function AdminOrders({ onActionSuccess }) {
                     {(detail.items || []).map((item) => (
                       <div key={item.id} className="flex items-center justify-between gap-3 px-4 py-3">
                         <div className="min-w-0">
-                          <p className="text-sm text-stone-900 truncate">{item.product_name}</p>
+                          <p className="text-sm font-semibold text-stone-900 truncate">{item.product_name}</p>
                           <p className="text-[11px] text-stone-400">
                             {item.variant_size} / {item.variant_color}
                             {item.sku ? ` • ${item.sku}` : ""} • {item.quantity}x @ {formatPrice(item.price)}
@@ -449,6 +572,44 @@ export default function AdminOrders({ onActionSuccess }) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION DELETE DIALOG --- */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-4">
+          <div
+            className="absolute inset-0 bg-stone-900/50 backdrop-blur-xs"
+            onClick={() => !deleting && setItemToDelete(null)}
+          />
+          <div className="relative transform overflow-hidden bg-white border border-stone-150 max-w-sm w-full p-6 text-left shadow-2xl transition-all">
+            <h3 className="font-serif text-lg font-medium text-stone-900 uppercase tracking-wider">Konfirmasi Hapus</h3>
+            <p className="mt-3 text-xs text-stone-550 leading-relaxed">
+              Apakah Anda yakin ingin menghapus pesanan{" "}
+              <span className="font-mono font-semibold text-stone-900">{itemToDelete.reference_id}</span> atas nama{" "}
+              <span className="font-semibold text-stone-900">&quot;{itemToDelete.buyer_name}&quot;</span>? Tindakan ini bersifat
+              permanen dan tidak dapat dibatalkan.
+            </p>
+            <div className="mt-6 flex justify-end space-x-3">
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => setItemToDelete(null)}
+                className="px-4 py-2 border border-stone-200 text-xs font-semibold uppercase tracking-wider text-stone-600 hover:bg-stone-50 transition-all disabled:opacity-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={executeDeleteOrder}
+                className="px-4 py-2 bg-red-650 hover:bg-red-755 text-white text-xs font-semibold uppercase tracking-wider transition-all disabled:opacity-50 flex items-center space-x-1.5"
+              >
+                {deleting && <Loader2 className="h-3 w-3 animate-spin" />}
+                <span>Hapus Permanen</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

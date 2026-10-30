@@ -2184,7 +2184,7 @@ app.get('/api/orders', verifyToken, async (req, res) => {
     queryParams.push(limit, offset);
 
     const [orders] = await pool.query(
-      `SELECT o.id, o.reference_id, o.buyer_name, o.buyer_phone, o.buyer_email, o.city, o.subtotal, o.total,
+      `SELECT o.id, o.reference_id, o.buyer_name, o.buyer_phone, o.buyer_email, o.address, o.city, o.notes, o.subtotal, o.total,
               o.status, o.payment_channel, o.paid_at, o.created_at,
               (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
        FROM orders o
@@ -2213,7 +2213,13 @@ app.get('/api/orders/:id', verifyToken, async (req, res) => {
     if (orders.length === 0) {
       return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
     }
-    const [items] = await pool.query('SELECT * FROM order_items WHERE order_id = ?', [id]);
+    const [items] = await pool.query(
+      `SELECT oi.*, p.description AS product_description
+       FROM order_items oi
+       LEFT JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id = ?`,
+      [id]
+    );
     res.json({ success: true, data: { ...orders[0], items } });
   } catch (error) {
     console.error('Get order detail error:', error);
@@ -2254,6 +2260,35 @@ app.put('/api/orders/:id/status', verifyToken, async (req, res) => {
     await connection.rollback();
     console.error('Update order status error:', error);
     res.status(500).json({ success: false, message: 'Gagal memperbarui status pesanan' });
+  } finally {
+    connection.release();
+  }
+});
+
+// DELETE /api/orders/:id (Admin) - hapus pesanan beserta item pesanan
+app.delete('/api/orders/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [orders] = await connection.query('SELECT id, reference_id FROM orders WHERE id = ? FOR UPDATE', [id]);
+    if (orders.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
+    }
+
+    // Hapus relasi order_items terlebih dahulu
+    await connection.query('DELETE FROM order_items WHERE order_id = ?', [id]);
+    // Hapus data order utama
+    await connection.query('DELETE FROM orders WHERE id = ?', [id]);
+
+    await connection.commit();
+    res.json({ success: true, message: 'Pesanan berhasil dihapus' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('Delete order error:', error);
+    res.status(500).json({ success: false, message: 'Gagal menghapus pesanan' });
   } finally {
     connection.release();
   }

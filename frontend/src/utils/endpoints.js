@@ -37,6 +37,7 @@ export const API_ENDPOINTS = {
     LIST: "/orders",
     DETAIL: (id) => `/orders/${id}`,
     UPDATE_STATUS: (id) => `/orders/${id}/status`,
+    DELETE: (id) => `/orders/${id}`,
     BY_REFERENCE: (referenceId) => `/orders/reference/${referenceId}`,
   },
   SETTINGS: {

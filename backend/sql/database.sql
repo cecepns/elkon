@@ -81,6 +81,46 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Orders table
+CREATE TABLE IF NOT EXISTS orders (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  reference_id VARCHAR(50) NOT NULL UNIQUE,
+  buyer_name VARCHAR(255) NOT NULL,
+  buyer_phone VARCHAR(50) NOT NULL,
+  buyer_email VARCHAR(255) NULL,
+  address TEXT NOT NULL,
+  city VARCHAR(100) NOT NULL,
+  notes TEXT NULL,
+  subtotal DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+  total DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+  status VARCHAR(50) DEFAULT 'pending', -- pending, paid, processing, shipped, completed, cancelled, expired
+  payment_provider VARCHAR(50) DEFAULT 'tripay',
+  payment_session_id VARCHAR(255) NULL,
+  payment_url VARCHAR(500) NULL,
+  ipaymu_trx_id VARCHAR(100) NULL,
+  payment_channel VARCHAR(100) NULL,
+  stock_reduced TINYINT(1) DEFAULT 0,
+  paid_at TIMESTAMP NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Order Items table
+CREATE TABLE IF NOT EXISTS order_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  order_id INT NOT NULL,
+  product_id INT NULL,
+  variant_id INT NULL,
+  product_name VARCHAR(255) NOT NULL,
+  variant_size VARCHAR(50) NULL,
+  variant_color VARCHAR(50) NULL,
+  sku VARCHAR(100) NULL,
+  price DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+  quantity INT NOT NULL DEFAULT 1,
+  subtotal DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE
+);
+
 -- Seed Admin User (password: admin123)
 INSERT INTO users (name, email, password, role) VALUES 
 ('Elkon Admin', 'admin@elkon.com', '$2a$10$tMhI3Q93l6M.8Jp7s9KqBuxm8n9Qx7L5pX5s6uA8EwG8oD.R1f1wK', 'admin')
