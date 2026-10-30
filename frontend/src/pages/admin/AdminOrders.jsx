@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { request } from "../../utils/request";
 import { API_ENDPOINTS } from "../../utils/endpoints";
 import { ORDER_STATUS_OPTIONS, getOrderStatusMeta } from "../../utils/orderStatus";
-import { downloadShippingLabelPdf } from "../../utils/shippingLabelPdf";
+import { downloadShippingLabelPdf, downloadBatchShippingLabelsPdf } from "../../utils/shippingLabelPdf";
 import {
   Loader2,
   X,
@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Download,
   Trash2,
+  FileDown,
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -67,7 +68,14 @@ export default function AdminOrders({ onActionSuccess }) {
   const [itemToDelete, setItemToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [batchDownloading, setBatchDownloading] = useState(false);
   const [storeSettings, setStoreSettings] = useState(null);
+
+  // Bersihkan pilihan checkbox saat berpindah halaman atau filter
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [page, search, statusFilter]);
 
   // Ambil pengaturan toko (untuk info pengirim pada label PDF)
   useEffect(() => {
@@ -205,6 +213,79 @@ export default function AdminOrders({ onActionSuccess }) {
     }
   };
 
+  // Toggle pilihan 1 pesanan
+  const toggleSelectOrder = (id) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  // Toggle pilih semua pesanan yang tampil di halaman ini
+  const toggleSelectAllVisible = () => {
+    const visibleIds = orders.map((o) => o.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+    if (allSelected) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(visibleIds);
+    }
+  };
+
+  // Download PDF per 10 data pesanan
+  const handleBatchDownloadPdf = async () => {
+    let targetOrders = [];
+    if (selectedIds.length > 0) {
+      targetOrders = orders.filter((o) => selectedIds.includes(o.id));
+    } else {
+      // Default: ambil 10 data pesanan dari halaman yang sedang aktif
+      targetOrders = orders.slice(0, 10);
+    }
+
+    if (targetOrders.length === 0) {
+      toast.error("Tidak ada data pesanan untuk diekspor ke PDF.");
+      return;
+    }
+
+    setBatchDownloading(true);
+    const toastId = toast.loading(`Menyiapkan ${targetOrders.length} data label kurir PDF...`);
+
+    try {
+      // Pastikan setiap pesanan memuat data lengkap item dan catatan/deskripsi
+      const fullOrders = await Promise.all(
+        targetOrders.map(async (ord) => {
+          if (ord.items && ord.items.length > 0 && ord.address) {
+            return ord;
+          }
+          try {
+            const res = await request.get(API_ENDPOINTS.ORDERS.DETAIL(ord.id));
+            if (res.success && res.data) {
+              return res.data;
+            }
+          } catch (e) {
+            console.warn(`Gagal mengambil detail pesanan #${ord.id}:`, e);
+          }
+          return ord;
+        })
+      );
+
+      downloadBatchShippingLabelsPdf({
+        orders: fullOrders,
+        storeInfo: {
+          name: "ELKON Official Store",
+          phone: storeSettings?.whatsapp_number || "0878-6540-7492",
+          city: "Indonesia",
+        },
+      });
+
+      toast.success(`${fullOrders.length} data PDF label kurir berhasil diunduh.`, { id: toastId });
+    } catch (err) {
+      console.error("Gagal mendownload batch PDF:", err);
+      toast.error("Gagal membuat batch PDF label pengiriman.", { id: toastId });
+    } finally {
+      setBatchDownloading(false);
+    }
+  };
+
   // Nomor halaman dengan elipsis
   const pageNumbers = () => {
     const total = pagination.totalPages;
@@ -225,6 +306,25 @@ export default function AdminOrders({ onActionSuccess }) {
         <div>
           <h2 className="text-xl font-serif font-light text-stone-900 tracking-wide">PESANAN MASUK</h2>
           <p className="text-xs text-stone-400">Kelola pesanan pembeli, pantau status pembayaran, dan perbarui status pengiriman.</p>
+        </div>
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={handleBatchDownloadPdf}
+            disabled={batchDownloading || orders.length === 0}
+            className="inline-flex items-center space-x-2 bg-stone-900 text-white px-4 py-2.5 text-xs font-semibold uppercase tracking-wider hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
+            title="Download PDF pesanan yang diceklis atau 10 data di halaman ini"
+          >
+            {batchDownloading ? (
+              <Loader2 className="h-4 w-4 animate-spin text-stone-300" />
+            ) : (
+              <FileDown className="h-4 w-4" />
+            )}
+            <span>
+              {selectedIds.length > 0
+                ? `Download PDF (${selectedIds.length} Pesanan Diceklis)`
+                : `Download PDF (10 Data)`}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -301,10 +401,53 @@ export default function AdminOrders({ onActionSuccess }) {
         </div>
       ) : (
         <>
+          {selectedIds.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-stone-100 border border-stone-200 px-4 py-2.5 text-xs text-stone-700">
+              <div className="flex items-center space-x-2">
+                <span className="font-semibold text-stone-900">{selectedIds.length} pesanan terpilih</span>
+                <span>(dari {Math.min(orders.length, 10)} data di halaman ini)</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  className="text-stone-500 hover:text-stone-900 underline underline-offset-4 cursor-pointer"
+                >
+                  Batalkan Pilihan
+                </button>
+                <button
+                  type="button"
+                  onClick={handleBatchDownloadPdf}
+                  disabled={batchDownloading}
+                  className="inline-flex items-center space-x-1.5 bg-stone-900 text-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wider hover:bg-stone-800 disabled:opacity-50 transition-all cursor-pointer"
+                >
+                  {batchDownloading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <FileDown className="h-3.5 w-3.5" />
+                  )}
+                  <span>Download PDF ({selectedIds.length})</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="overflow-x-auto border border-stone-150 bg-white rounded shadow-xs">
             <table className="min-w-full divide-y divide-stone-150 text-left text-sm">
               <thead className="bg-stone-50 text-[10px] font-bold uppercase tracking-wider text-stone-550">
                 <tr>
+                  <th className="px-4 py-4 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        orders.slice(0, 10).length > 0 &&
+                        orders.slice(0, 10).every((o) => selectedIds.includes(o.id))
+                      }
+                      onChange={toggleSelectAllVisible}
+                      className="rounded border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
+                      title="Pilih 10 pesanan di halaman ini"
+                    />
+                  </th>
                   <th className="px-6 py-4">Referensi</th>
                   <th className="px-6 py-4">Tanggal</th>
                   <th className="px-6 py-4">Pembeli</th>
@@ -317,8 +460,23 @@ export default function AdminOrders({ onActionSuccess }) {
               <tbody className="divide-y divide-stone-150 text-stone-755">
                 {orders.map((order) => {
                   const meta = getOrderStatusMeta(order.status);
+                  const isSelected = selectedIds.includes(order.id);
                   return (
-                    <tr key={order.id} className="hover:bg-stone-50/50">
+                    <tr
+                      key={order.id}
+                      className={`hover:bg-stone-50/50 transition-colors ${
+                        isSelected ? "bg-amber-50/40" : ""
+                      }`}
+                    >
+                      <td className="px-4 py-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectOrder(order.id)}
+                          className="rounded border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
+                          title="Pilih pesanan ini"
+                        />
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap font-mono text-xs font-semibold text-stone-900">
                         {order.reference_id}
                       </td>

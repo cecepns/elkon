@@ -2,7 +2,7 @@
  * shippingLabelPdf.js
  * Utility untuk membuat dan mengunduh file PDF Label Pengiriman (Shipping Label)
  * untuk kebutuhan kurir (JNE, J&T, SiCepat, Anteraja, Gosend, Grab, dll).
- * Menyertakan nama, alamat, nomor telepon, dan deskripsi/catatan pembeli saat checkout.
+ * Mendukung single label maupun batch export (misal 10 pesanan per file PDF multi-halaman).
  */
 
 // Helper: Bungkus teks panjang menjadi beberapa baris
@@ -50,99 +50,13 @@ function formatDateIndo(dateStr) {
 }
 
 /**
- * Membangun binary PDF string dari dokumen label
+ * Buat stream perintah visual PDF untuk satu halaman label kurir
  */
-function buildPdfDoc(width, height, contentStreamText) {
-  // Konversi string konten ke byte stream
-  const contentBytes = [];
-  for (let i = 0; i < contentStreamText.length; i++) {
-    contentBytes.push(contentStreamText.charCodeAt(i) & 0xff);
-  }
-  const streamLength = contentBytes.length;
-
-  const objects = [];
-  // 1: Catalog
-  objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj');
-  // 2: Pages
-  objects.push('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj');
-  // 3: Page (Ukuran dinamis A6)
-  objects.push(
-    `3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width.toFixed(2)} ${height.toFixed(2)}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>\nendobj`
-  );
-  // 4: Regular Font (Helvetica)
-  objects.push('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj');
-  // 5: Bold Font (Helvetica-Bold)
-  objects.push('5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj');
-  // 6: Stream Konten
-  objects.push(`6 0 obj\n<< /Length ${streamLength} >>\nstream\n${contentStreamText}\nendstream\nendobj`);
-
-  let pdfHeader = '%PDF-1.4\n';
-  const offsets = [];
-  let currentOffset = pdfHeader.length;
-
-  let body = '';
-  objects.forEach((obj) => {
-    offsets.push(currentOffset);
-    const objStr = obj + '\n';
-    body += objStr;
-    currentOffset += objStr.length;
-  });
-
-  const xrefOffset = currentOffset;
-  let xref = 'xref\n';
-  xref += `0 ${objects.length + 1}\n`;
-  xref += '0000000000 65535 f \n';
-  offsets.forEach((offset) => {
-    xref += offset.toString().padStart(10, '0') + ' 00000 n \n';
-  });
-
-  let trailer = 'trailer\n';
-  trailer += `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
-  trailer += 'startxref\n';
-  trailer += `${xrefOffset}\n`;
-  trailer += '%%EOF\n';
-
-  const fullPdfStr = pdfHeader + body + xref + trailer;
-  const resultBytes = new Uint8Array(fullPdfStr.length);
-  for (let i = 0; i < fullPdfStr.length; i++) {
-    resultBytes[i] = fullPdfStr.charCodeAt(i) & 0xff;
-  }
-  return resultBytes;
-}
-
-/**
- * Generate binary array PDF untuk label pengiriman kurir
- */
-export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
-  // Lebar standar label A6 (105mm ~ 298pt)
-  const width = 298;
+function createSingleLabelStream(order, storeInfo, width, height) {
   const mx = 12;
   const my = 12;
   const cw = width - mx * 2;
-
-  // Deskripsi / Catatan Pembeli saat checkout (order.notes)
-  const buyerDescription = (order.notes || '').trim();
-  const descLines = buyerDescription ? wrapText(buyerDescription, 50) : [];
-  const descBoxHeight = descLines.length > 0 ? 18 + descLines.length * 11 : 0;
-
-  // Item pesanan
-  const items = order.items || [];
-  const itemsContentHeight = 16 + items.length * 13;
-  const itemsSectionHeight = Math.max(38, itemsContentHeight + 6);
-
-  // Total tinggi dihitung dinamis agar deskripsi pembeli berapapun panjangnya tertampung utuh
-  const calculatedHeight =
-    my +
-    38 + 6 +
-    30 + 6 +
-    114 + 6 +
-    44 + 6 +
-    (descBoxHeight > 0 ? descBoxHeight + 6 : 0) +
-    itemsSectionHeight +
-    26 +
-    my;
-
-  const height = Math.max(420, Math.ceil(calculatedHeight));
+  const ch = height - my * 2;
 
   const toPdfY = (y) => (height - y).toFixed(2);
 
@@ -170,8 +84,7 @@ export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
 
   let c = '';
 
-  // Frame luar solid
-  const ch = height - my * 2;
+  // Frame luar solid tegas
   c += rect(mx, my, cw, ch, true, true, [1, 1, 1], [0.15, 0.15, 0.15], 1.2);
 
   // 1. Header Toko & Label
@@ -190,7 +103,7 @@ export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
   const statusLabel = order.status === 'paid' ? 'LUNAS (PAID)' : String(order.status || 'PROSES').toUpperCase();
   c += text('STATUS: ' + statusLabel, mx + cw - 105, my + 70, 7.5, true, [0.1, 0.4, 0.1]);
 
-  // 3. BOX PENERIMA (TUJUAN PENGIRIMAN) - Nama, No Telp, Alamat, Kota
+  // 3. BOX PENERIMA (TUJUAN PENGIRIMAN)
   let currentY = my + 80;
   const penerimaBoxHeight = 114;
   c += rect(mx + 6, currentY, cw - 12, penerimaBoxHeight, true, true, [1, 1, 1], [0.15, 0.15, 0.15], 1.2);
@@ -234,8 +147,11 @@ export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
 
   currentY += senderHeight + 6;
 
-  // 5. BOX DESKRIPSI PEMBELI SAAT CHECKOUT (CATATAN PENGIRIMAN DARI PEMBELI)
+  // 5. BOX DESKRIPSI PEMBELI SAAT CHECKOUT (JIKA ADA)
+  const buyerDescription = (order.notes || '').trim();
+  const descLines = buyerDescription ? wrapText(buyerDescription, 50) : [];
   if (descLines.length > 0) {
+    const descBoxHeight = 18 + descLines.length * 11;
     c += rect(mx + 6, currentY, cw - 12, descBoxHeight, true, true, [1, 0.98, 0.91], [0.9, 0.75, 0.35], 0.9);
     c += text('DESKRIPSI PEMBELI SAAT CHECKOUT:', mx + 12, currentY + 11, 7, true, [0.7, 0.4, 0.05]);
     let noteRowY = currentY + 22;
@@ -247,18 +163,27 @@ export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
   }
 
   // 6. BOX ISI PAKET (DETAIL BARANG)
-  c += rect(mx + 6, currentY, cw - 12, itemsSectionHeight, true, true, [1, 1, 1], [0.8, 0.8, 0.8], 0.75);
-  c += rect(mx + 6, currentY, cw - 12, 14, true, true, [0.94, 0.94, 0.94], [0.8, 0.8, 0.8], 0.5);
-  c += text('DAFTAR ISI PAKET', mx + 12, currentY + 10, 6.5, true, [0.3, 0.3, 0.3]);
-  c += text('QTY', mx + cw - 32, currentY + 10, 6.5, true, [0.3, 0.3, 0.3]);
+  const remainingHeight = height - my - currentY - 24;
+  if (remainingHeight > 30) {
+    c += rect(mx + 6, currentY, cw - 12, remainingHeight, true, true, [1, 1, 1], [0.8, 0.8, 0.8], 0.75);
+    c += rect(mx + 6, currentY, cw - 12, 14, true, true, [0.94, 0.94, 0.94], [0.8, 0.8, 0.8], 0.5);
+    c += text('DAFTAR ISI PAKET', mx + 12, currentY + 10, 6.5, true, [0.3, 0.3, 0.3]);
+    c += text('QTY', mx + cw - 32, currentY + 10, 6.5, true, [0.3, 0.3, 0.3]);
 
-  let itemY = currentY + 22;
-  items.forEach((item) => {
-    const title = `${item.product_name || 'Item'} (${item.variant_size || '-'}/${item.variant_color || '-'})`;
-    c += text(title.substring(0, 38), mx + 12, itemY, 7.5, false, [0.15, 0.15, 0.15]);
-    c += text(`${item.quantity}x`, mx + cw - 30, itemY, 7.5, true, [0.1, 0.1, 0.1]);
-    itemY += 13;
-  });
+    let itemY = currentY + 22;
+    const items = order.items || [];
+    const maxItems = Math.floor((remainingHeight - 16) / 13);
+    items.slice(0, maxItems).forEach((item) => {
+      const title = `${item.product_name || 'Item'} (${item.variant_size || '-'}/${item.variant_color || '-'})`;
+      c += text(title.substring(0, 38), mx + 12, itemY, 7.5, false, [0.15, 0.15, 0.15]);
+      c += text(`${item.quantity}x`, mx + cw - 30, itemY, 7.5, true, [0.1, 0.1, 0.1]);
+      itemY += 13;
+    });
+
+    if (items.length > maxItems) {
+      c += text(`+ ${items.length - maxItems} item lainnya`, mx + 12, itemY, 7, false, [0.5, 0.5, 0.5]);
+    }
+  }
 
   // 7. Garis Potong Label Kurir (Dotted Cut Line)
   c += line(mx, height - my - 14, width - mx, height - my - 14, [0.5, 0.5, 0.5], 0.6, true);
@@ -271,11 +196,100 @@ export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
     [0.5, 0.5, 0.5]
   );
 
-  return buildPdfDoc(width, height, c);
+  return c;
 }
 
 /**
- * Download langsung file PDF Label Pengiriman ke komputer pengguna
+ * Generate binary array PDF untuk 1 pesanan
+ */
+export function generateShippingLabelPdfBytes({ order, storeInfo = {} }) {
+  return generateBatchShippingLabelsPdfBytes({ orders: [order], storeInfo });
+}
+
+/**
+ * Generate binary array PDF multi-halaman untuk batch pesanan (misal 10 pesanan)
+ */
+export function generateBatchShippingLabelsPdfBytes({ orders = [], storeInfo = {} }) {
+  if (!orders || orders.length === 0) return new Uint8Array(0);
+
+  const width = 298;  // Lebar A6 dalam pt
+  const height = 430; // Tinggi A6 standar dalam pt
+
+  const objects = [];
+  const pageObjIds = [];
+  let nextObjId = 5; // setelah 1:Catalog, 2:Pages, 3:Font-F1, 4:Font-F2
+
+  const pageDefs = [];
+  orders.forEach((order) => {
+    const pageId = nextObjId++;
+    const contentId = nextObjId++;
+    pageObjIds.push(pageId);
+
+    const streamText = createSingleLabelStream(order, storeInfo, width, height);
+    const contentBytes = [];
+    for (let i = 0; i < streamText.length; i++) {
+      contentBytes.push(streamText.charCodeAt(i) & 0xff);
+    }
+    const streamLength = contentBytes.length;
+
+    pageDefs.push({
+      pageObj: `${pageId} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width.toFixed(2)} ${height.toFixed(2)}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentId} 0 R >>\nendobj`,
+      contentObj: `${contentId} 0 obj\n<< /Length ${streamLength} >>\nstream\n${streamText}\nendstream\nendobj`,
+    });
+  });
+
+  // 1: Catalog
+  objects.push('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj');
+  // 2: Pages Root
+  const kidsStr = pageObjIds.map((id) => `${id} 0 R`).join(' ');
+  objects.push(`2 0 obj\n<< /Type /Pages /Kids [${kidsStr}] /Count ${orders.length} >>\nendobj`);
+  // 3: Font F1 (Helvetica)
+  objects.push('3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj');
+  // 4: Font F2 (Helvetica-Bold)
+  objects.push('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj');
+
+  // Tambahkan semua page dan stream content
+  pageDefs.forEach((pd) => {
+    objects.push(pd.pageObj);
+    objects.push(pd.contentObj);
+  });
+
+  let pdfHeader = '%PDF-1.4\n';
+  const offsets = [];
+  let currentOffset = pdfHeader.length;
+
+  let body = '';
+  objects.forEach((obj) => {
+    offsets.push(currentOffset);
+    const objStr = obj + '\n';
+    body += objStr;
+    currentOffset += objStr.length;
+  });
+
+  const xrefOffset = currentOffset;
+  let xref = 'xref\n';
+  xref += `0 ${objects.length + 1}\n`;
+  xref += '0000000000 65535 f \n';
+  offsets.forEach((offset) => {
+    xref += offset.toString().padStart(10, '0') + ' 00000 n \n';
+  });
+
+  let trailer = 'trailer\n';
+  trailer += `<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  trailer += 'startxref\n';
+  trailer += `${xrefOffset}\n`;
+  trailer += '%%EOF\n';
+
+  const fullPdfStr = pdfHeader + body + xref + trailer;
+  const resultBytes = new Uint8Array(fullPdfStr.length);
+  for (let i = 0; i < fullPdfStr.length; i++) {
+    resultBytes[i] = fullPdfStr.charCodeAt(i) & 0xff;
+  }
+  return resultBytes;
+}
+
+/**
+ * Download file PDF Label Pengiriman tunggal
  */
 export function downloadShippingLabelPdf({ order, storeInfo = {} }) {
   if (!order) return;
@@ -286,6 +300,31 @@ export function downloadShippingLabelPdf({ order, storeInfo = {} }) {
 
   const safeRef = String(order.reference_id || 'order').replace(/[^a-zA-Z0-9_-]/g, '_');
   const filename = `Label-Kurir-${safeRef}.pdf`;
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+
+  setTimeout(() => {
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+/**
+ * Download file PDF Batch Label Pengiriman (misal 10 pesanan per file)
+ */
+export function downloadBatchShippingLabelsPdf({ orders = [], storeInfo = {}, customFilename }) {
+  if (!orders || orders.length === 0) return;
+
+  const pdfBytes = generateBatchShippingLabelsPdfBytes({ orders, storeInfo });
+  const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = customFilename || `Label-Kurir-Batch-${orders.length}-Pesanan-${dateStr}.pdf`;
 
   const link = document.createElement('a');
   link.href = url;
