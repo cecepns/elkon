@@ -402,31 +402,35 @@ export default function AdminOrders({ onActionSuccess }) {
       ) : (
         <>
           {selectedIds.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-stone-100 border border-stone-200 px-4 py-2.5 text-xs text-stone-700">
-              <div className="flex items-center space-x-2">
-                <span className="font-semibold text-stone-900">{selectedIds.length} pesanan terpilih</span>
-                <span>(dari {Math.min(orders.length, 10)} data di halaman ini)</span>
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-stone-900 text-white px-5 py-3 shadow-md rounded-xs">
+              <div className="flex items-center space-x-3">
+                <span className="inline-flex items-center justify-center bg-white text-stone-900 text-xs font-bold w-6 h-6 rounded-full">
+                  {selectedIds.length}
+                </span>
+                <span className="text-xs font-medium">
+                  pesanan diceklis untuk di-download PDF
+                </span>
               </div>
               <div className="flex items-center space-x-3">
                 <button
                   type="button"
                   onClick={() => setSelectedIds([])}
-                  className="text-stone-500 hover:text-stone-900 underline underline-offset-4 cursor-pointer"
+                  className="text-stone-300 hover:text-white text-xs underline underline-offset-4 cursor-pointer"
                 >
-                  Batalkan Pilihan
+                  Batal Ceklis
                 </button>
                 <button
                   type="button"
                   onClick={handleBatchDownloadPdf}
                   disabled={batchDownloading}
-                  className="inline-flex items-center space-x-1.5 bg-stone-900 text-white px-3 py-1.5 text-xs font-semibold uppercase tracking-wider hover:bg-stone-800 disabled:opacity-50 transition-all cursor-pointer"
+                  className="inline-flex items-center space-x-2 bg-white text-stone-900 px-4 py-2 text-xs font-bold uppercase tracking-wider hover:bg-stone-100 disabled:opacity-50 transition-all cursor-pointer shadow-sm"
                 >
                   {batchDownloading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin text-stone-900" />
                   ) : (
-                    <FileDown className="h-3.5 w-3.5" />
+                    <FileDown className="h-4 w-4 text-stone-900" />
                   )}
-                  <span>Download PDF ({selectedIds.length})</span>
+                  <span>Download PDF ({selectedIds.length} Pesanan Diceklis)</span>
                 </button>
               </div>
             </div>
@@ -440,12 +444,12 @@ export default function AdminOrders({ onActionSuccess }) {
                     <input
                       type="checkbox"
                       checked={
-                        orders.slice(0, 10).length > 0 &&
-                        orders.slice(0, 10).every((o) => selectedIds.includes(o.id))
+                        orders.length > 0 &&
+                        orders.every((o) => selectedIds.includes(o.id))
                       }
                       onChange={toggleSelectAllVisible}
-                      className="rounded border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
-                      title="Pilih 10 pesanan di halaman ini"
+                      className="h-4 w-4 rounded accent-stone-900 border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
+                      title="Ceklis semua pesanan di halaman ini"
                     />
                   </th>
                   <th className="px-6 py-4">Referensi</th>
@@ -465,7 +469,7 @@ export default function AdminOrders({ onActionSuccess }) {
                     <tr
                       key={order.id}
                       className={`hover:bg-stone-50/50 transition-colors ${
-                        isSelected ? "bg-amber-50/40" : ""
+                        isSelected ? "bg-amber-50/50" : ""
                       }`}
                     >
                       <td className="px-4 py-4 text-center">
@@ -473,8 +477,8 @@ export default function AdminOrders({ onActionSuccess }) {
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => toggleSelectOrder(order.id)}
-                          className="rounded border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
-                          title="Pilih pesanan ini"
+                          className="h-4 w-4 rounded accent-stone-900 border-stone-300 text-stone-900 focus:ring-0 cursor-pointer"
+                          title="Ceklis pesanan ini"
                         />
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap font-mono text-xs font-semibold text-stone-900">
