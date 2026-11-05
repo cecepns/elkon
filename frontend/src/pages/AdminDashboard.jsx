@@ -32,8 +32,12 @@ import {
 
 const TAB_CONFIG = [
   { id: "products", label: "Produk", icon: Package, getBadge: (s) => s.totalProducts },
-  { id: "categories", label: "Kategori", icon: Tags, getBadge: (s) => s.totalCategories },
-  { id: "banners", label: "Banner Swiper", icon: ImageIcon, getBadge: (s) => s.totalBanners },
+  {
+    id: "sales",
+    label: "Laporan Penjualan",
+    icon: TrendingUp,
+    aliases: ["sales-report", "laporan", "laporan-penjualan", "report"],
+  },
   {
     id: "orders",
     label: "Pesanan",
@@ -42,12 +46,8 @@ const TAB_CONFIG = [
     alertBadge: (s) => s.pendingOrders,
     alertBadgeColor: "bg-amber-500",
   },
-  {
-    id: "sales",
-    label: "Laporan Penjualan",
-    icon: TrendingUp,
-    aliases: ["sales-report", "laporan", "laporan-penjualan", "report"],
-  },
+  { id: "categories", label: "Kategori", icon: Tags, getBadge: (s) => s.totalCategories },
+  { id: "banners", label: "Banner Swiper", icon: ImageIcon, getBadge: (s) => s.totalBanners },
   {
     id: "contacts",
     label: "Pesan Kontak",

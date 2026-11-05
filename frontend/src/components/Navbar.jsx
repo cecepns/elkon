@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ShoppingBag, LogOut, LayoutDashboard, Menu, X, LogIn } from "lucide-react";
+import { ShoppingBag, LogOut, LayoutDashboard, Menu, X, LogIn, TrendingUp } from "lucide-react";
 
 export default function Navbar({ cartCount, onCartOpen, isAuthenticated, onLogout }) {
   const navigate = useNavigate();
@@ -39,6 +39,14 @@ export default function Navbar({ cartCount, onCartOpen, isAuthenticated, onLogou
                 >
                   <LayoutDashboard className="h-5 w-5" />
                   <span className="hidden sm:inline text-[10px] tracking-wider uppercase">Dasbor</span>
+                </Link>
+                <Link
+                  to="/admin/sales-report"
+                  className="flex items-center space-x-1 text-sm font-medium hover:text-stone-900 transition-colors duration-200"
+                  title="Laporan Penjualan"
+                >
+                  <TrendingUp className="h-5 w-5" />
+                  <span className="hidden sm:inline text-[10px] tracking-wider uppercase">Laporan</span>
                 </Link>
                 <button
                   onClick={() => {
@@ -122,6 +130,14 @@ export default function Navbar({ cartCount, onCartOpen, isAuthenticated, onLogou
                 >
                   <LayoutDashboard className="h-4 w-4" />
                   <span>Dasbor Admin</span>
+                </Link>
+                <Link
+                  to="/admin/sales-report"
+                  className="flex items-center space-x-2 hover:text-stone-900 py-3 border-b border-stone-50 transition-colors duration-200"
+                  onClick={closeMobileMenu}
+                >
+                  <TrendingUp className="h-4 w-4" />
+                  <span>Laporan Penjualan</span>
                 </Link>
                 <button
                   onClick={() => {
