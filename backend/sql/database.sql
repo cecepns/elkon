@@ -185,3 +185,18 @@ INSERT INTO settings (key_name, value_text) VALUES
 ('whatsapp_number', '6287865407492'),
 ('preorder_policy', '{"items":["Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.","Pembayaran dilakukan sebelum pesanan diproses.","Pesanan yang sudah masuk produksi tidak dapat dibatalkan.","Perubahan ukuran/warna maksimal 1x24 jam setelah pembayaran.","Produk dikirim setelah proses produksi dan QC selesai.","Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing."],"disclaimer":"By placing an order, you agree to our Pre-Order Policy. ✨"}')
 ON DUPLICATE KEY UPDATE value_text=value_text;
+
+-- Seed Sample Orders (untuk laporan & rekap penjualan per varian/ukuran)
+INSERT INTO orders (id, reference_id, buyer_name, buyer_phone, buyer_email, address, city, notes, subtotal, total, status, paid_at) VALUES
+(1, 'ORD-20261101-001', 'Sabrina Novianti', '081298765432', 'sabrina@gmail.com', 'Jl. Merdeka No. 45, Kebayoran Baru', 'Jakarta Selatan', 'Batch PO 1 - mohon diproses', 48950000.00, 48950000.00, 'processing', NOW() - INTERVAL 2 DAY),
+(2, 'ORD-20261102-002', 'Dewi Lestari', '085712345678', 'dewi@gmail.com', 'Jl. Sukajadi No. 12', 'Bandung', 'Seragam tim kantor', 34500000.00, 34500000.00, 'paid', NOW() - INTERVAL 1 DAY),
+(3, 'ORD-20261103-003', 'Andi Pratama', '082187654321', 'andi@corp.id', 'Jl. Pemuda No. 88', 'Surabaya', 'Prioritas pengiriman kilat', 16500000.00, 16500000.00, 'shipped', NOW() - INTERVAL 12 HOUR)
+ON DUPLICATE KEY UPDATE id=id;
+
+-- Seed Sample Order Items (mencerminkan pembelian dalam jumlah banyak per seri & ukuran)
+INSERT INTO order_items (id, order_id, product_id, variant_id, product_name, variant_size, variant_color, sku, price, quantity, subtotal) VALUES
+(1, 1, 1, 3, 'Linen Editorial Trench', 'L', 'Beige', 'ELK-TRN-BEG-L', 3450000.00, 10, 34500000.00),
+(2, 1, 2, 9, 'Raw Silk Slip Dress', 'M', 'Cream', 'ELK-SLP-CRM-M', 2890000.00, 5, 14450000.00),
+(3, 2, 1, 2, 'Linen Editorial Trench', 'M', 'Beige', 'ELK-TRN-BEG-M', 3450000.00, 10, 34500000.00),
+(4, 3, 3, 15, 'Minimalist Linen Resort Shirt', 'L', 'Off-White', 'ELK-RES-WHT-L', 1650000.00, 10, 16500000.00)
+ON DUPLICATE KEY UPDATE id=id;

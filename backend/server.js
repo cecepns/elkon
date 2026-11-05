@@ -2205,6 +2205,302 @@ app.get('/api/orders', verifyToken, async (req, res) => {
   }
 });
 
+// Helper to build sales report WHERE clauses and parameters
+function buildSalesReportFilters(query) {
+  const whereClauses = [];
+  const params = [];
+
+  const status = String(query.status || 'valid').trim();
+  const search = String(query.search || '').trim();
+  const startDate = String(query.startDate || '').trim();
+  const endDate = String(query.endDate || '').trim();
+
+  // Status filter
+  if (status === 'valid') {
+    whereClauses.push("o.status IN ('paid', 'processing', 'shipped', 'completed')");
+  } else if (status === 'all_except_cancelled') {
+    whereClauses.push("o.status NOT IN ('cancelled', 'expired')");
+  } else if (status === 'all') {
+    // Tidak ada filter status, mencakup semua status
+  } else if (status) {
+    whereClauses.push("o.status = ?");
+    params.push(status);
+  }
+
+  // Date filters
+  if (startDate) {
+    whereClauses.push("o.created_at >= ?");
+    params.push(`${startDate} 00:00:00`);
+  }
+  if (endDate) {
+    whereClauses.push("o.created_at <= ?");
+    params.push(`${endDate} 23:59:59`);
+  }
+
+  // Search filter
+  if (search) {
+    whereClauses.push("(oi.product_name LIKE ? OR oi.variant_color LIKE ? OR oi.variant_size LIKE ? OR oi.sku LIKE ?)");
+    const wild = `%${search}%`;
+    params.push(wild, wild, wild, wild);
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  return { whereSql, params };
+}
+
+// GET /api/orders/sales-report (Admin) - rekap penjualan per varian produk (judul series, warna, ukuran)
+app.get('/api/orders/sales-report', verifyToken, async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = parseInt(req.query.limit) === -1 ? -1 : Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = limit > 0 ? (page - 1) * limit : 0;
+    const sort = String(req.query.sort || 'qty_desc').trim();
+
+    const { whereSql, params } = buildSalesReportFilters(req.query);
+
+    // 1. Ambil Summary Keseluruhan (Total Pcs, Total Omzet, Total Pesanan Unik, Total Varian Terjual)
+    const [summaryRows] = await pool.query(
+      `SELECT 
+         COALESCE(SUM(oi.quantity), 0) AS total_items_sold,
+         COALESCE(SUM(oi.subtotal), 0) AS total_revenue,
+         COUNT(DISTINCT oi.order_id) AS total_orders,
+         COUNT(DISTINCT CONCAT(oi.product_name, '::', COALESCE(oi.variant_color, ''), '::', COALESCE(oi.variant_size, ''))) AS total_variants
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       ${whereSql}`,
+      params
+    );
+
+    const summary = summaryRows[0] || {
+      total_items_sold: 0,
+      total_revenue: 0,
+      total_orders: 0,
+      total_variants: 0,
+    };
+
+    // 2. Hitung Total Baris Varian untuk Pagination
+    const [countRows] = await pool.query(
+      `SELECT COUNT(*) AS total
+       FROM (
+         SELECT 1
+         FROM order_items oi
+         JOIN orders o ON oi.order_id = o.id
+         ${whereSql}
+         GROUP BY oi.product_name, COALESCE(oi.variant_color, '-'), COALESCE(oi.variant_size, '-')
+       ) AS grouped`,
+      params
+    );
+    const total = Number(countRows[0]?.total || 0);
+    const totalPages = limit > 0 ? Math.ceil(total / limit) : 1;
+
+    // 3. Tentukan Pengurutan
+    let orderSql = 'ORDER BY total_qty DESC, total_subtotal DESC';
+    if (sort === 'qty_asc') orderSql = 'ORDER BY total_qty ASC, total_subtotal ASC';
+    else if (sort === 'name_asc') orderSql = 'ORDER BY oi.product_name ASC, variant_color ASC, variant_size ASC';
+    else if (sort === 'name_desc') orderSql = 'ORDER BY oi.product_name DESC, variant_color DESC, variant_size DESC';
+    else if (sort === 'subtotal_desc') orderSql = 'ORDER BY total_subtotal DESC';
+    else if (sort === 'subtotal_asc') orderSql = 'ORDER BY total_subtotal ASC';
+
+    // 4. Query Data Detail per Varian
+    const queryParams = [...params];
+    let limitSql = '';
+    if (limit > 0) {
+      limitSql = 'LIMIT ? OFFSET ?';
+      queryParams.push(limit, offset);
+    }
+
+    const [items] = await pool.query(
+      `SELECT 
+         MAX(oi.product_id) AS product_id,
+         MAX(oi.variant_id) AS variant_id,
+         oi.product_name,
+         COALESCE(oi.variant_color, '-') AS variant_color,
+         COALESCE(oi.variant_size, '-') AS variant_size,
+         MAX(oi.sku) AS sku,
+         SUM(oi.quantity) AS total_qty,
+         SUM(oi.subtotal) AS total_subtotal,
+         COUNT(DISTINCT oi.order_id) AS total_orders,
+         MAX(COALESCE(pv.image, p.image)) AS image,
+         MAX(pv.stock) AS current_stock,
+         ROUND(AVG(oi.price), 2) AS avg_price
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       LEFT JOIN products p ON oi.product_id = p.id
+       LEFT JOIN product_variants pv ON oi.variant_id = pv.id
+       ${whereSql}
+       GROUP BY oi.product_name, COALESCE(oi.variant_color, '-'), COALESCE(oi.variant_size, '-')
+       ${orderSql}
+       ${limitSql}`,
+      queryParams
+    );
+
+    // 5. Query Data Matriks Ukuran (Pivot per Seri/Produk untuk Eksekusi Produksi)
+    const [matrixRows] = await pool.query(
+      `SELECT 
+         MAX(oi.product_id) AS product_id,
+         oi.product_name,
+         COALESCE(oi.variant_color, '-') AS variant_color,
+         COALESCE(oi.variant_size, '-') AS variant_size,
+         SUM(oi.quantity) AS total_qty,
+         SUM(oi.subtotal) AS total_subtotal,
+         MAX(COALESCE(pv.image, p.image)) AS image
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       LEFT JOIN products p ON oi.product_id = p.id
+       LEFT JOIN product_variants pv ON oi.variant_id = pv.id
+       ${whereSql}
+       GROUP BY oi.product_name, COALESCE(oi.variant_color, '-'), COALESCE(oi.variant_size, '-')
+       ORDER BY oi.product_name ASC, variant_color ASC`,
+      params
+    );
+
+    const standardSizeOrder = ['XXS', 'XS', 'S', 'M', 'L', 'XL', '2XL', 'XXL', '3XL', 'XXXL', 'ALL SIZE', 'OS'];
+    const sizeSet = new Set();
+    const matrixMap = new Map();
+
+    for (const row of matrixRows) {
+      const size = String(row.variant_size || '-').trim();
+      sizeSet.add(size);
+      const key = `${row.product_name}___${row.variant_color}`;
+      if (!matrixMap.has(key)) {
+        matrixMap.set(key, {
+          product_id: row.product_id,
+          product_name: row.product_name,
+          variant_color: row.variant_color,
+          image: row.image,
+          sizes: {},
+          total_qty: 0,
+          total_subtotal: 0,
+        });
+      }
+      const entry = matrixMap.get(key);
+      entry.sizes[size] = (entry.sizes[size] || 0) + Number(row.total_qty);
+      entry.total_qty += Number(row.total_qty);
+      entry.total_subtotal += Number(row.total_subtotal);
+    }
+
+    const availableSizes = Array.from(sizeSet).sort((a, b) => {
+      const idxA = standardSizeOrder.indexOf(a.toUpperCase());
+      const idxB = standardSizeOrder.indexOf(b.toUpperCase());
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+
+    const matrix = Array.from(matrixMap.values()).sort((a, b) => b.total_qty - a.total_qty);
+
+    res.json({
+      success: true,
+      data: items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      summary: {
+        total_items_sold: Number(summary.total_items_sold || 0),
+        total_revenue: Number(summary.total_revenue || 0),
+        total_orders: Number(summary.total_orders || 0),
+        total_variants: Number(summary.total_variants || 0),
+      },
+      matrix,
+      availableSizes,
+    });
+  } catch (error) {
+    console.error('Get sales report error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil rekap laporan penjualan' });
+  }
+});
+
+// GET /api/orders/sales-report/detail (Admin) - daftar pemesan untuk satu varian spesifik
+app.get('/api/orders/sales-report/detail', verifyToken, async (req, res) => {
+  try {
+    const productName = String(req.query.product_name || '').trim();
+    const variantColor = String(req.query.variant_color || '').trim();
+    const variantSize = String(req.query.variant_size || '').trim();
+
+    if (!productName) {
+      return res.status(400).json({ success: false, message: 'Parameter product_name wajib diisi' });
+    }
+
+    const whereClauses = ['oi.product_name = ?'];
+    const params = [productName];
+
+    if (variantColor && variantColor !== 'all') {
+      whereClauses.push("COALESCE(oi.variant_color, '-') = ?");
+      params.push(variantColor);
+    }
+    if (variantSize && variantSize !== 'all') {
+      whereClauses.push("COALESCE(oi.variant_size, '-') = ?");
+      params.push(variantSize);
+    }
+
+    const status = String(req.query.status || 'valid').trim();
+    const startDate = String(req.query.startDate || '').trim();
+    const endDate = String(req.query.endDate || '').trim();
+
+    if (status === 'valid') {
+      whereClauses.push("o.status IN ('paid', 'processing', 'shipped', 'completed')");
+    } else if (status === 'all_except_cancelled') {
+      whereClauses.push("o.status NOT IN ('cancelled', 'expired')");
+    } else if (status === 'all') {
+      // no status filter
+    } else if (status) {
+      whereClauses.push("o.status = ?");
+      params.push(status);
+    }
+
+    if (startDate) {
+      whereClauses.push("o.created_at >= ?");
+      params.push(`${startDate} 00:00:00`);
+    }
+    if (endDate) {
+      whereClauses.push("o.created_at <= ?");
+      params.push(`${endDate} 23:59:59`);
+    }
+
+    const [orders] = await pool.query(
+      `SELECT 
+         o.id AS order_id,
+         o.reference_id,
+         o.buyer_name,
+         o.buyer_phone,
+         o.buyer_email,
+         o.city,
+         o.address,
+         o.status AS order_status,
+         o.created_at,
+         oi.product_name,
+         oi.variant_color,
+         oi.variant_size,
+         oi.sku,
+         oi.quantity,
+         oi.price,
+         oi.subtotal
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       WHERE ${whereClauses.join(' AND ')}
+       ORDER BY o.created_at DESC`,
+      params
+    );
+
+    res.json({
+      success: true,
+      data: {
+        product_name: productName,
+        variant_color: variantColor,
+        variant_size: variantSize,
+        orders,
+      },
+    });
+  } catch (error) {
+    console.error('Get sales report detail error:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil detail pembeli varian' });
+  }
+});
+
 // GET /api/orders/:id (Admin) - detail pesanan + item
 app.get('/api/orders/:id', verifyToken, async (req, res) => {
   const { id } = req.params;

@@ -39,6 +39,8 @@ export const API_ENDPOINTS = {
     UPDATE_STATUS: (id) => `/orders/${id}/status`,
     DELETE: (id) => `/orders/${id}`,
     BY_REFERENCE: (referenceId) => `/orders/reference/${referenceId}`,
+    SALES_REPORT: "/orders/sales-report",
+    SALES_REPORT_DETAIL: "/orders/sales-report/detail",
   },
   SETTINGS: {
     PUBLIC: "/settings",

@@ -270,6 +270,12 @@ export default function App() {
                 isAuthenticated ? <AdminDashboard /> : <Navigate to="/login" replace />
               }
             />
+            <Route
+              path="/admin/:tab"
+              element={
+                isAuthenticated ? <AdminDashboard /> : <Navigate to="/login" replace />
+              }
+            />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
