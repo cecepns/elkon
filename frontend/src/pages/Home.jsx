@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
-import { ArrowRight, Info, X } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import HeroImage from '../assets/product_silk_dress.png';
 
 // Import Swiper React components & modules
@@ -32,9 +32,6 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingBanners, setLoadingBanners] = useState(true);
-
-  // Pre-Order popup state
-  const [poPopup, setPoPopup] = useState(null);
 
   // Fetch banners and categories on mount
   useEffect(() => {
@@ -381,24 +378,13 @@ export default function Home() {
               const imageUrl = getImageUrl(product.image);
 
               return (
-                <div key={product.id} className="group space-y-3 sm:space-y-4 transition-all duration-300 fade-in flex flex-col justify-between">
-                  <div className="space-y-4">
+                <div
+                  key={product.id}
+                  className="group space-y-3 sm:space-y-4 transition-all duration-300 fade-in flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
                     <Link to={`/product/${product.id}`} className="block overflow-hidden bg-stone-50 border border-stone-100">
                       <div className="relative aspect-[3/4] overflow-hidden">
-                        {(product.is_preorder === 1 || product.is_preorder === true) && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setPoPopup(product);
-                            }}
-                            className="absolute top-3 left-3 z-10 bg-stone-900 text-white text-[8px] sm:text-[9px] font-semibold uppercase tracking-widest px-2.5 py-1.5 shadow-sm inline-flex items-center gap-1.5 hover:bg-stone-800 transition-colors cursor-pointer"
-                          >
-                            <span>Pre-Order: {product.preorder_days || 14} Hari</span>
-                            <Info className="h-3 w-3 opacity-70" />
-                          </button>
-                        )}
                         <img
                           src={imageUrl}
                           alt={product.name}
@@ -408,29 +394,24 @@ export default function Home() {
                       </div>
                     </Link>
 
-                    <div className="space-y-2.5 px-0.5">
+                    <div className="space-y-1.5 px-0.5">
                       <span className="text-[9px] md:text-[10px] font-semibold tracking-wider uppercase text-stone-400 block">
                         {product.category || "Tanpa Kategori"}
                       </span>
 
-                      <div className="space-y-1">
-                        <h4 className="font-serif text-sm md:text-lg font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-2 leading-snug">
+                      <div className="flex flex-col sm:flex-row justify-between sm:items-baseline gap-1">
+                        <h4 className="font-serif text-sm md:text-base font-light text-stone-900 hover:text-stone-600 transition-colors line-clamp-1">
                           <Link to={`/product/${product.id}`}>{product.name}</Link>
                         </h4>
-                        <p className="text-[11px] md:text-xs font-semibold text-stone-900">{formatPrice(product.base_price)}</p>
-                      </div>
-
-                      {/* Description with generous spacing */}
-                      {product.description && (
-                        <p className="text-[11px] md:text-xs text-stone-500 font-light line-clamp-3 leading-[1.8]">
-                          {product.description}
+                        <p className="text-[11px] md:text-xs font-semibold text-stone-900 whitespace-nowrap">
+                          {formatPrice(product.base_price)}
                         </p>
-                      )}
+                      </div>
                     </div>
                   </div>
 
                   {/* Lihat Selengkapnya link */}
-                  <div className="pt-2 px-0.5">
+                  <div className="pt-1 px-0.5">
                     <Link
                       to={`/product/${product.id}`}
                       className="inline-flex items-center space-x-1.5 text-xs font-medium uppercase tracking-wider text-stone-900 hover:text-stone-600 hover:underline transition-colors"
@@ -475,60 +456,6 @@ export default function Home() {
           </div>
         </div>
       </section>
-
-      {/* Pre-Order Info Popup Modal */}
-      {poPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-stone-900/50 backdrop-blur-xs" onClick={() => setPoPopup(null)} />
-          <div className="relative bg-white border border-stone-150 shadow-2xl max-w-md w-full p-6 sm:p-8 space-y-5 animate-fade-in">
-            <button
-              type="button"
-              onClick={() => setPoPopup(null)}
-              className="absolute top-3 right-3 p-1.5 text-stone-400 hover:text-stone-900 hover:bg-stone-100 transition-colors cursor-pointer"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="space-y-1.5 pr-8">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                Informasi Pre-Order
-              </span>
-              <h3 className="font-serif text-lg text-stone-900 leading-snug">
-                {poPopup.name}
-              </h3>
-              <p className="text-xs text-stone-500">
-                Estimasi produksi:{" "}
-                <span className="font-semibold text-stone-800">
-                  {poPopup.preorder_days || 14} hari kerja
-                </span>
-              </p>
-            </div>
-
-            <div className="h-[1px] bg-stone-100" />
-
-            <ul className="text-xs text-stone-600 font-light leading-[1.9] space-y-2 list-disc list-inside">
-              <li>Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.</li>
-              <li>Pembayaran dilakukan sebelum pesanan diproses.</li>
-              <li>Pesanan yang sudah masuk produksi tidak dapat dibatalkan.</li>
-              <li>Perubahan ukuran/warna maksimal 1×24 jam setelah pembayaran.</li>
-              <li>Produk dikirim setelah proses produksi dan QC selesai.</li>
-              <li>Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing.</li>
-            </ul>
-
-            <p className="text-[11px] text-stone-400 italic leading-relaxed">
-              By placing an order, you agree to our Pre-Order Policy. ✨
-            </p>
-
-            <Link
-              to={`/product/${poPopup.id}`}
-              className="block w-full text-center bg-stone-900 text-white text-xs font-semibold uppercase tracking-widest py-3.5 hover:bg-stone-800 transition-colors"
-              onClick={() => setPoPopup(null)}
-            >
-              Lihat Detail Produk
-            </Link>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

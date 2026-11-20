@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { request } from "../utils/request";
 import { API_ENDPOINTS } from "../utils/endpoints";
 import { getImageUrl } from "../utils/api";
-import { Minus, Plus, ShoppingBag, ArrowLeft, AlertTriangle, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Minus, Plus, ShoppingBag, ArrowLeft, AlertTriangle, ChevronLeft, ChevronRight, Sparkles, Info, X } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPolicy }) {
@@ -19,6 +19,9 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
 
   // Active image slide state
   const [activeMediaIndex, setActiveMediaIndex] = useState(0);
+
+  // Pre-Order Modal Popup State
+  const [isPoModalOpen, setIsPoModalOpen] = useState(false);
 
   useEffect(() => {
     async function loadProduct() {
@@ -224,25 +227,10 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
         {/* Left Side: Multiple Images Slide & Thumbnails */}
         <div className="space-y-4">
           {/* Main Slide Viewer */}
-          <div className="relative overflow-hidden bg-stone-50 border border-stone-150 aspect-[3/4] group flex items-center justify-center">
-            {/* Preorder badge */}
-            {(product.is_preorder === 1 || product.is_preorder === true) && (
-              <div className="absolute top-4 left-4 z-10 bg-stone-900 text-white text-[9px] font-semibold uppercase tracking-widest px-3 py-1 shadow">
-                Pre-Order: {product.preorder_days || 14} Hari
-              </div>
-            )}
-
-            {/* Active Variant Indicator Badge */}
-            {activeMedia.isVariant && (
-              <div className="absolute bottom-4 left-4 z-10 bg-stone-900/80 backdrop-blur-xs text-white text-[9px] font-medium tracking-wider uppercase px-2.5 py-1 rounded shadow flex items-center space-x-1.5">
-                <Sparkles className="h-3 w-3 text-amber-300" />
-                <span>{activeMedia.label}</span>
-              </div>
-            )}
-
+          <div className="relative overflow-hidden bg-white border border-stone-150 aspect-[3/4] group flex items-center justify-center">
             {/* Image Slide Counter */}
             {mediaList.length > 1 && (
-              <div className="absolute top-4 right-4 z-10 bg-stone-900/60 backdrop-blur-xs text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow">
+              <div className="absolute top-4 right-4 z-10 bg-white/90 border border-stone-200 text-stone-700 text-[10px] font-semibold px-2 py-0.5 rounded-none shadow-xs">
                 {activeMediaIndex + 1} / {mediaList.length}
               </div>
             )}
@@ -252,7 +240,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
               key={activeMedia.url}
               src={currentMainImageUrl}
               alt={product.name}
-              className="w-full h-full object-cover object-center fade-in duration-300"
+              className="w-full h-full object-cover object-center fade-in duration-300 bg-white"
             />
 
             {/* Prev / Next Slide Navigation Buttons */}
@@ -261,7 +249,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                 <button
                   type="button"
                   onClick={handlePrevSlide}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20 cursor-pointer"
                   aria-label="Foto Sebelumnya"
                 >
                   <ChevronLeft className="h-5 w-5" />
@@ -269,7 +257,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                 <button
                   type="button"
                   onClick={handleNextSlide}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 bg-white/80 hover:bg-white text-stone-900 rounded-full shadow-md backdrop-blur-xs flex items-center justify-center opacity-80 sm:opacity-0 group-hover:opacity-100 transition-all duration-200 z-20 cursor-pointer"
                   aria-label="Foto Berikutnya"
                 >
                   <ChevronRight className="h-5 w-5" />
@@ -278,7 +266,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
             )}
           </div>
 
-          {/* Thumbnails Row */}
+          {/* Thumbnails Row - Clean White Aesthetic (No black background overlay) */}
           {mediaList.length > 1 && (
             <div className="flex items-center gap-2.5 overflow-x-auto pb-2 scrollbar-none">
               <style>{`
@@ -299,18 +287,13 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                     key={item.url + index}
                     type="button"
                     onClick={() => handleSelectMedia(index)}
-                    className={`relative flex-shrink-0 w-16 sm:w-20 aspect-[3/4] rounded overflow-hidden border-2 transition-all duration-200 ${
+                    className={`relative flex-shrink-0 w-16 sm:w-20 aspect-[3/4] overflow-hidden bg-white border transition-all duration-200 cursor-pointer ${
                       isSelected
-                        ? "border-stone-900 ring-2 ring-stone-900/30 scale-105 shadow-md"
-                        : "border-stone-200 hover:border-stone-450 opacity-70 hover:opacity-100"
+                        ? "border-stone-900 ring-1 ring-stone-900 shadow-xs"
+                        : "border-stone-200 hover:border-stone-400 opacity-80 hover:opacity-100"
                     }`}
                   >
-                    <img src={thumbUrl} alt="" className="h-full w-full object-cover" />
-                    {item.isVariant && (
-                      <span className="absolute bottom-0 inset-x-0 bg-stone-900/85 text-white text-[7px] font-bold uppercase tracking-tight py-0.5 truncate px-1 text-center">
-                        {item.variant?.color || "Varian"}
-                      </span>
-                    )}
+                    <img src={thumbUrl} alt="" className="h-full w-full object-cover bg-white" />
                   </button>
                 );
               })}
@@ -325,11 +308,6 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
               <span className="text-[10px] font-semibold tracking-[0.2em] uppercase text-stone-400">
                 {product.category || "Tanpa Kategori"}
               </span>
-              {(product.is_preorder === 1 || product.is_preorder === true) && (
-                <span className="bg-stone-900 text-white text-[8px] font-semibold uppercase tracking-widest px-2 py-0.5 shadow-sm">
-                  Pre-Order: {product.preorder_days || 14} Hari
-                </span>
-              )}
             </div>
             <h1 className="font-serif text-3xl md:text-5xl font-light text-stone-900 leading-tight">
               {product.name}
@@ -338,25 +316,42 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
               {formatPrice(currentPrice)}
             </p>
 
+            {/* Pre-Order Banner with Trigger to Open Modal */}
+            {(product.is_preorder === 1 || product.is_preorder === true) && (
+              <div className="flex items-center justify-between p-3.5 bg-stone-50 border border-stone-200">
+                <div className="flex items-center space-x-2.5">
+                  <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-900 block">
+                      Pesanan Pre-Order
+                    </span>
+                    <span className="text-[10px] text-stone-500 font-light">
+                      Estimasi produksi: {product.preorder_days || 14} hari kerja
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPoModalOpen(true)}
+                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-stone-300 text-[10px] font-semibold uppercase tracking-wider text-stone-800 hover:border-stone-900 hover:text-stone-900 shadow-xs transition-colors cursor-pointer"
+                >
+                  <Info className="h-3.5 w-3.5 text-stone-500" />
+                  <span>Ketentuan PO</span>
+                </button>
+              </div>
+            )}
+
             <div className="h-[1px] w-full bg-stone-100" />
 
-            <p className="text-sm font-light text-stone-500 leading-relaxed">
-              {product.description}
-            </p>
-
-            {(product.is_preorder === 1 || product.is_preorder === true) && preorderPolicy && (
-              <div className="bg-stone-550/5 border border-stone-200 p-4 text-xs space-y-3">
-                <p className="font-semibold uppercase tracking-wider text-stone-850">Informasi Pre-Order</p>
-                <ul className="text-stone-550 font-light leading-relaxed space-y-1.5 list-disc list-inside">
-                  {preorderPolicy.items.map((item, index) => (
-                    <li key={index}>{item}</li>
-                  ))}
-                </ul>
-                {preorderPolicy.disclaimer && (
-                  <p className="text-stone-500 font-light italic">
-                    {preorderPolicy.disclaimer}
-                  </p>
-                )}
+            {/* Formatted Product Description / Caption */}
+            {product.description && (
+              <div className="space-y-2 py-1">
+                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 block">
+                  Deskripsi Produk
+                </span>
+                <div className="text-sm font-light text-stone-600 leading-loose whitespace-pre-line break-words">
+                  {product.description}
+                </div>
               </div>
             )}
 
@@ -505,6 +500,78 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
           </div>
         </div>
       </div>
+      {/* Modal Pop-up Ketentuan Pre-Order */}
+      {isPoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-stone-900/50 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsPoModalOpen(false)}
+          />
+          <div className="relative bg-white border border-stone-200 shadow-2xl max-w-lg w-full p-6 sm:p-8 space-y-5 animate-fade-in z-10">
+            <button
+              type="button"
+              onClick={() => setIsPoModalOpen(false)}
+              className="absolute top-4 right-4 p-1.5 text-stone-400 hover:text-stone-900 hover:bg-stone-100 rounded-sm transition-colors cursor-pointer"
+              aria-label="Tutup"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-stone-400 block">
+                Kebijakan & Ketentuan
+              </span>
+              <h3 className="font-serif text-2xl font-light text-stone-900">
+                Informasi Pre-Order (PO)
+              </h3>
+              <p className="text-xs text-stone-500 font-light">
+                Estimasi waktu produksi:{" "}
+                <span className="font-semibold text-stone-900">
+                  {product.preorder_days || 14} hari kerja
+                </span>
+              </p>
+            </div>
+
+            <div className="h-[1px] bg-stone-100" />
+
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-stone-850">
+                Ketentuan Pemesanan:
+              </p>
+              <ul className="text-xs text-stone-600 font-light leading-loose space-y-2 list-disc list-inside">
+                {preorderPolicy?.items?.map((item, idx) => (
+                  <li key={idx} className="leading-relaxed">
+                    {item}
+                  </li>
+                )) || (
+                  <>
+                    <li>Estimasi produksi: 7–14 hari kerja, kalau orderan terlalu banyak maksimal 40 hari kerja.</li>
+                    <li>Pembayaran dilakukan sebelum pesanan diproses.</li>
+                    <li>Pesanan yang sudah masuk produksi tidak dapat dibatalkan.</li>
+                    <li>Perubahan ukuran/warna maksimal 1×24 jam setelah pembayaran.</li>
+                    <li>Produk dikirim setelah proses produksi dan QC selesai.</li>
+                    <li>Penukaran hanya berlaku untuk kesalahan pengiriman atau cacat produksi dengan video unboxing.</li>
+                  </>
+                )}
+              </ul>
+            </div>
+
+            {preorderPolicy?.disclaimer && (
+              <p className="text-[11px] text-stone-400 italic leading-relaxed pt-2 border-t border-stone-100">
+                {preorderPolicy.disclaimer}
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsPoModalOpen(false)}
+              className="w-full bg-stone-900 text-white text-xs font-semibold uppercase tracking-widest py-3.5 hover:bg-stone-800 transition-colors cursor-pointer"
+            >
+              Saya Mengerti
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
