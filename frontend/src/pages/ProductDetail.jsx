@@ -349,7 +349,7 @@ export default function ProductDetail({ onAddToCart, whatsappNumber, preorderPol
                 <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400 block">
                   Deskripsi Produk
                 </span>
-                <div className="text-sm font-light text-stone-600 leading-loose whitespace-pre-line break-words">
+                <div className="text-sm font-light text-stone-600 leading-loose whitespace-pre-line break-words text-justify">
                   {product.description}
                 </div>
               </div>
